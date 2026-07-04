@@ -7,6 +7,9 @@ import org.bukkit.entity.Mannequin;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.UUID;
 
 public class BotNPC {
@@ -95,15 +98,42 @@ public class BotNPC {
 
     private ResolvableProfile buildProfile() {
         Player online = Bukkit.getPlayerExact(name);
-        UUID profileUuid;
         if (online != null) {
-            profileUuid = online.getUniqueId();
-        } else {
-            profileUuid = Bukkit.getOfflinePlayer(name).getUniqueId();
+            try {
+                return buildProfileFromOnlinePlayer(online);
+            } catch (Exception ignored) {}
         }
+        UUID profileUuid = online != null ? online.getUniqueId() :
+            Bukkit.getOfflinePlayer(name).getUniqueId();
         return ResolvableProfile.resolvableProfile()
                 .name(name)
                 .uuid(profileUuid)
                 .build();
+    }
+
+    private ResolvableProfile buildProfileFromOnlinePlayer(Player online) throws Exception {
+        Class<?> gpClass = Class.forName("com.mojang.authlib.GameProfile");
+        Constructor<?> gpCon = gpClass.getConstructor(UUID.class, String.class);
+        Object botGp = gpCon.newInstance(uuid, name);
+
+        Object craftPlayer = online.getClass().getMethod("getHandle").invoke(online);
+        Object realGp = null;
+        for (Class<?> cls = craftPlayer.getClass(); cls != null; cls = cls.getSuperclass()) {
+            try {
+                Field f = cls.getDeclaredField("gameProfile");
+                f.setAccessible(true);
+                realGp = f.get(craftPlayer);
+                break;
+            } catch (NoSuchFieldException ignored) {}
+        }
+        if (realGp != null) {
+            Method getProps = gpClass.getMethod("getProperties");
+            Object realProps = getProps.invoke(realGp);
+            Object botProps = getProps.invoke(botGp);
+            realProps.getClass().getMethod("putAll", java.util.Map.class).invoke(botProps, realProps);
+        }
+
+        Method factory = ResolvableProfile.class.getMethod("resolvableProfile", gpClass);
+        return (ResolvableProfile) factory.invoke(null, botGp);
     }
 }
