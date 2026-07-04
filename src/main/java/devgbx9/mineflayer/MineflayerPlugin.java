@@ -1,8 +1,8 @@
-package me.fallenbreath.template_plugin;
+package devgbx9.mineflayer;
 
 import org.bukkit.plugin.java.JavaPlugin;
 
-public class TemplatePlugin extends JavaPlugin {
+public class MineflayerPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {

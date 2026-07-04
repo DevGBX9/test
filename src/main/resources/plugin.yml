@@ -1,4 +1,5 @@
 name: ${name}
 version: ${version}
-main: me.fallenbreath.template_plugin.TemplatePlugin
+main: devgbx9.mineflayer.MineflayerPlugin
 api-version: ${minecraft_version}
+author: DevGBX9
