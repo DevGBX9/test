@@ -60,6 +60,7 @@ public class BotNPC {
                 serverPlayer = NMSHelper.createAndJoinFakePlayer(name, uuid, location);
                 Player bukkitPlayer = NMSHelper.toBukkitPlayer(serverPlayer);
                 bukkitPlayer.setInvulnerable(true);
+                NMSHelper.broadcastJoinMessage(name);
                 Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' registered as player");
             } catch (Exception e) {
                 Bukkit.getLogger().warning("[Mineflayer] Player registration failed for '" + name + "': " + e.getMessage());
@@ -85,6 +86,7 @@ public class BotNPC {
             try {
                 NMSHelper.removeFakePlayer(serverPlayer);
             } catch (Exception ignored) {}
+            NMSHelper.broadcastLeaveMessage(name);
             serverPlayer = null;
         }
 
@@ -93,7 +95,12 @@ public class BotNPC {
 
     private ResolvableProfile buildProfile() {
         Player online = Bukkit.getPlayerExact(name);
-        UUID profileUuid = online != null ? online.getUniqueId() : uuid;
+        UUID profileUuid;
+        if (online != null) {
+            profileUuid = online.getUniqueId();
+        } else {
+            profileUuid = Bukkit.getOfflinePlayer(name).getUniqueId();
+        }
         return ResolvableProfile.resolvableProfile()
                 .name(name)
                 .uuid(profileUuid)

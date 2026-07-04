@@ -9,6 +9,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class NMSHelper {
@@ -20,9 +21,6 @@ public class NMSHelper {
     private static Method craftWorldGetHandle;
 
     private static Method minecraftServerGetPlayerList;
-    private static Method playerListPlaceNewPlayer;
-    private static Method playerListRemove;
-    private static Field playerListPlayersField;
 
     private static Constructor<?> serverPlayerConstructor;
     private static Method serverPlayerSetPos;
@@ -37,6 +35,12 @@ public class NMSHelper {
     private static Field connectionChannelField;
     private static Object unsafe;
     private static Class<?> connectionCls;
+
+    private static Method playerListPlaceNewPlayer;
+    private static Method playerListRemove;
+    private static Field playerListPlayersField;
+    private static Field playerListByNameField;
+    private static Field playerListByUUIDField;
 
     private static Constructor<?> gamePacketListenerConstructor;
     private static Method cookieCreateInitial;
@@ -85,6 +89,9 @@ public class NMSHelper {
             playerListRemove = findMethod(playerListCls, "remove", 1);
             playerListPlayersField = getAccessibleField(playerListCls, "players");
             if (playerListPlayersField == null) playerListPlayersField = findListField(playerListCls);
+            playerListByNameField = getAccessibleField(playerListCls, "playersByName");
+            playerListByUUIDField = getAccessibleField(playerListCls, "playersByUUID");
+
             Class<?> listenerCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
             Class<?> cookieCls = Class.forName("net.minecraft.server.network.CommonListenerCookie");
             cookieCreateInitial = findMethod(cookieCls, "createInitial", 2);
@@ -135,17 +142,40 @@ public class NMSHelper {
                 return serverPlayer;
             } catch (Exception e) {
                 Bukkit.getLogger().warning("[Mineflayer] placeNewPlayer failed: " + e.getMessage());
+                e.printStackTrace();
             }
         }
 
+        // Manual registration fallback
         if (playerListPlayersField != null) {
             @SuppressWarnings("unchecked")
             List<Object> players = (List<Object>) playerListPlayersField.get(playerList);
             players.add(serverPlayer);
-            Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' added directly to player list");
         }
 
+        if (playerListByNameField != null) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> byName = (Map<String, Object>) playerListByNameField.get(playerList);
+            byName.put(name.toLowerCase(java.util.Locale.ENGLISH), serverPlayer);
+        }
+
+        if (playerListByUUIDField != null) {
+            @SuppressWarnings("unchecked")
+            Map<UUID, Object> byUUID = (Map<UUID, Object>) playerListByUUIDField.get(playerList);
+            byUUID.put(uuid, serverPlayer);
+        }
+
+        Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' registered manually");
+
         return serverPlayer;
+    }
+
+    public static void broadcastJoinMessage(String name) {
+        Bukkit.broadcastMessage("§e" + name + " joined the game");
+    }
+
+    public static void broadcastLeaveMessage(String name) {
+        Bukkit.broadcastMessage("§e" + name + " left the game");
     }
 
     public static boolean removeFakePlayer(Object serverPlayer) throws Exception {
