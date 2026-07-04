@@ -1,8 +1,6 @@
 package devgbx9.mineflayer;
 
-import com.destroystokyo.paper.profile.PlayerProfile;
-import com.destroystokyo.paper.profile.ProfileProperty;
-import org.bukkit.Bukkit;
+import io.papermc.paper.datacomponent.item.ResolvableProfile;
 import org.bukkit.Location;
 import org.bukkit.entity.Mannequin;
 import org.jetbrains.annotations.Nullable;
@@ -30,8 +28,10 @@ public class BotNPC {
     }
 
     public void spawn(Location location) {
-        PlayerProfile profile = Bukkit.createProfile(uuid, name);
-        profile.getProperties().add(new ProfileProperty("textures", "", ""));
+        ResolvableProfile profile = ResolvableProfile.resolvableProfile()
+                .name(name)
+                .uuid(uuid)
+                .build();
 
         entity = location.getWorld().spawn(location, Mannequin.class, m -> {
             m.setProfile(profile);
