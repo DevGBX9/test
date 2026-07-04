@@ -85,8 +85,6 @@ public class NMSHelper {
             playerListRemove = findMethod(playerListCls, "remove", 1);
             playerListPlayersField = getAccessibleField(playerListCls, "players");
             if (playerListPlayersField == null) playerListPlayersField = findListField(playerListCls);
-            playerListGetPlayer = findMethod(playerListCls, "getPlayer", 1);
-
             Class<?> listenerCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
             Class<?> cookieCls = Class.forName("net.minecraft.server.network.CommonListenerCookie");
             cookieCreateInitial = findMethod(cookieCls, "createInitial", 2);
