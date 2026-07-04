@@ -20,9 +20,13 @@ public class NMSHelper {
     private static Method craftWorldGetHandle;
 
     private static Method minecraftServerGetPlayerList;
+    private static Method playerListPlaceNewPlayer;
+    private static Method playerListRemove;
+    private static Field playerListPlayersField;
 
     private static Constructor<?> serverPlayerConstructor;
     private static Method serverPlayerSetPos;
+    private static Field serverPlayerConnectionField;
 
     private static Method clientInformationCreateDefault;
     private static Constructor<?> gameProfileConstructor;
@@ -31,14 +35,11 @@ public class NMSHelper {
     private static Constructor<?> connectionConstructor;
     private static Field connectionAddressField;
     private static Field connectionChannelField;
-
-    private static Method playerListPlaceNewPlayer;
-    private static Method playerListRemove;
-    private static Field playerListPlayersField;
+    private static Object unsafe;
+    private static Class<?> connectionCls;
 
     private static Constructor<?> gamePacketListenerConstructor;
     private static Method cookieCreateInitial;
-    private static Field serverPlayerConnectionField;
 
     public static boolean isAvailable() {
         return initialized;
@@ -73,16 +74,18 @@ public class NMSHelper {
                 packetFlowServerbound = findEnumConstant(packetFlowCls, "SERVERBOUND");
             }
 
-            Class<?> connectionCls = Class.forName("net.minecraft.network.Connection");
+            connectionCls = Class.forName("net.minecraft.network.Connection");
             connectionConstructor = findCompatibleConstructor(connectionCls, packetFlowCls);
             connectionAddressField = getAccessibleField(connectionCls, "address");
             connectionChannelField = getAccessibleField(connectionCls, "channel");
+            setupUnsafe();
 
             Class<?> playerListCls = Class.forName("net.minecraft.server.players.PlayerList");
             playerListPlaceNewPlayer = findMethod(playerListCls, "placeNewPlayer", 3);
             playerListRemove = findMethod(playerListCls, "remove", 1);
             playerListPlayersField = getAccessibleField(playerListCls, "players");
             if (playerListPlayersField == null) playerListPlayersField = findListField(playerListCls);
+            playerListGetPlayer = findMethod(playerListCls, "getPlayer", 1);
 
             Class<?> listenerCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
             Class<?> cookieCls = Class.forName("net.minecraft.server.network.CommonListenerCookie");
@@ -110,24 +113,25 @@ public class NMSHelper {
             serverPlayerSetPos.invoke(serverPlayer, location.getX(), location.getY(), location.getZ());
         }
 
+        Object conn = createConnection();
+        Object cookie = null;
+        if (cookieCreateInitial != null) {
+            cookie = cookieCreateInitial.invoke(null, profile, false);
+        }
+
+        if (conn != null && serverPlayerConnectionField != null && gamePacketListenerConstructor != null && cookie != null) {
+            try {
+                Object listener = gamePacketListenerConstructor.newInstance(nmsServer, conn, serverPlayer, cookie);
+                serverPlayerConnectionField.set(serverPlayer, listener);
+            } catch (Exception e) {
+                Bukkit.getLogger().warning("[Mineflayer] Failed to set player connection: " + e.getMessage());
+            }
+        }
+
         Object playerList = minecraftServerGetPlayerList.invoke(nmsServer);
 
-        // Try placeNewPlayer with a dummy Connection
-        if (playerListPlaceNewPlayer != null && connectionConstructor != null && packetFlowServerbound != null) {
+        if (playerListPlaceNewPlayer != null && conn != null && cookie != null) {
             try {
-                Object conn = connectionConstructor.newInstance(packetFlowServerbound);
-                if (connectionAddressField != null)
-                    connectionAddressField.set(conn, new InetSocketAddress("127.0.0.1", 0));
-                if (connectionChannelField != null)
-                    connectionChannelField.set(conn, null);
-
-                Object cookie = cookieCreateInitial.invoke(null, profile, false);
-
-                if (serverPlayerConnectionField != null && gamePacketListenerConstructor != null) {
-                    Object listener = gamePacketListenerConstructor.newInstance(nmsServer, conn, serverPlayer, cookie);
-                    serverPlayerConnectionField.set(serverPlayer, listener);
-                }
-
                 playerListPlaceNewPlayer.invoke(playerList, conn, serverPlayer, cookie);
                 Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' registered via placeNewPlayer");
                 return serverPlayer;
@@ -136,7 +140,6 @@ public class NMSHelper {
             }
         }
 
-        // Fallback: add directly to player list
         if (playerListPlayersField != null) {
             @SuppressWarnings("unchecked")
             List<Object> players = (List<Object>) playerListPlayersField.get(playerList);
@@ -165,6 +168,59 @@ public class NMSHelper {
 
     public static Player toBukkitPlayer(Object serverPlayer) throws Exception {
         return (Player) serverPlayer.getClass().getMethod("getBukkitEntity").invoke(serverPlayer);
+    }
+
+    // ---------- Connection creation ----------
+
+    private static Object createConnection() {
+        if (packetFlowServerbound == null || connectionCls == null) return null;
+
+        if (connectionConstructor != null) {
+            try {
+                Object conn = connectionConstructor.newInstance(packetFlowServerbound);
+                fillConnectionFields(conn);
+                return conn;
+            } catch (Exception ignored) {}
+        }
+
+        if (unsafe != null) {
+            try {
+                Method allocate = unsafe.getClass().getMethod("allocateInstance", Class.class);
+                Object conn = allocate.invoke(unsafe, connectionCls);
+
+                for (Field f : connectionCls.getDeclaredFields()) {
+                    Class<?> ft = f.getType();
+                    if (ft.isEnum() && ft.getName().contains("PacketFlow")) {
+                        f.setAccessible(true);
+                        f.set(conn, packetFlowServerbound);
+                        break;
+                    }
+                }
+
+                fillConnectionFields(conn);
+                return conn;
+            } catch (Exception ignored) {}
+        }
+
+        return null;
+    }
+
+    private static void fillConnectionFields(Object conn) {
+        if (connectionAddressField != null) {
+            try { connectionAddressField.set(conn, new InetSocketAddress("127.0.0.1", 0)); } catch (Exception ignored) {}
+        }
+        if (connectionChannelField != null) {
+            try { connectionChannelField.set(conn, null); } catch (Exception ignored) {}
+        }
+    }
+
+    private static void setupUnsafe() {
+        try {
+            Class<?> unsafeCls = Class.forName("sun.misc.Unsafe");
+            Field f = unsafeCls.getDeclaredField("theUnsafe");
+            f.setAccessible(true);
+            unsafe = f.get(null);
+        } catch (Exception ignored) {}
     }
 
     // ---------- helpers ----------

@@ -14,6 +14,7 @@ public class BotNPC {
     private final String name;
     private final UUID uuid;
     private Mannequin mannequin;
+    private Object serverPlayer;
     private boolean alive;
 
     public BotNPC(String name, UUID uuid) {
@@ -33,15 +34,6 @@ public class BotNPC {
     @Nullable
     public Mannequin getMannequin() {
         return mannequin;
-    }
-
-    private ResolvableProfile buildProfile() {
-        Player online = Bukkit.getPlayerExact(name);
-        UUID profileUuid = online != null ? online.getUniqueId() : uuid;
-        return ResolvableProfile.resolvableProfile()
-                .name(name)
-                .uuid(profileUuid)
-                .build();
     }
 
     public boolean isAlive() {
@@ -65,8 +57,8 @@ public class BotNPC {
 
         if (NMSHelper.isAvailable()) {
             try {
-                Object sp = NMSHelper.createAndJoinFakePlayer(name, uuid, location);
-                Player bukkitPlayer = NMSHelper.toBukkitPlayer(sp);
+                serverPlayer = NMSHelper.createAndJoinFakePlayer(name, uuid, location);
+                Player bukkitPlayer = NMSHelper.toBukkitPlayer(serverPlayer);
                 bukkitPlayer.setInvulnerable(true);
                 Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' registered as player");
             } catch (Exception e) {
@@ -85,6 +77,26 @@ public class BotNPC {
             mannequin = null;
         }
 
+        if (serverPlayer != null) {
+            try {
+                Player bukkitPlayer = NMSHelper.toBukkitPlayer(serverPlayer);
+                bukkitPlayer.kickPlayer("Bot removed");
+            } catch (Exception ignored) {}
+            try {
+                NMSHelper.removeFakePlayer(serverPlayer);
+            } catch (Exception ignored) {}
+            serverPlayer = null;
+        }
+
         alive = false;
+    }
+
+    private ResolvableProfile buildProfile() {
+        Player online = Bukkit.getPlayerExact(name);
+        UUID profileUuid = online != null ? online.getUniqueId() : uuid;
+        return ResolvableProfile.resolvableProfile()
+                .name(name)
+                .uuid(profileUuid)
+                .build();
     }
 }
