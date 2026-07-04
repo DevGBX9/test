@@ -6,6 +6,7 @@ import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
+import org.bukkit.entity.Mannequin;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -23,7 +24,18 @@ public class MineflayerPlugin extends JavaPlugin implements TabExecutor {
         getCommand("mineflayer").setTabCompleter(this);
         botManager = new BotManager();
         getServer().getPluginManager().registerEvents(new BotListener(botManager), this);
+        cleanupOrphanedBots();
         getLogger().info(getName() + " v" + getPluginMeta().getVersion() + " enabled!");
+    }
+
+    private void cleanupOrphanedBots() {
+        for (org.bukkit.World world : Bukkit.getWorlds()) {
+            for (Mannequin m : world.getEntitiesByClass(Mannequin.class)) {
+                if (m.getScoreboardTags().contains("mineflayer_bot")) {
+                    m.remove();
+                }
+            }
+        }
     }
 
     @Override

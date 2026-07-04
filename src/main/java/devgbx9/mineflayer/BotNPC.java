@@ -56,6 +56,7 @@ public class BotNPC {
             m.setAI(false);
             m.setInvulnerable(true);
             m.setPersistent(true);
+            m.addScoreboardTag("mineflayer_bot");
         });
 
         if (NMSHelper.isAvailable()) {
