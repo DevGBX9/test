@@ -42,4 +42,8 @@ public class BotManager {
         }
         bots.clear();
     }
+
+    public List<String> getBotNames() {
+        return List.copyOf(bots.keySet());
+    }
 }

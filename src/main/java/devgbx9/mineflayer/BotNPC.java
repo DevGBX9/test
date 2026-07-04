@@ -35,6 +35,15 @@ public class BotNPC {
         return mannequin;
     }
 
+    private ResolvableProfile buildProfile() {
+        Player online = Bukkit.getPlayerExact(name);
+        UUID profileUuid = online != null ? online.getUniqueId() : uuid;
+        return ResolvableProfile.resolvableProfile()
+                .name(name)
+                .uuid(profileUuid)
+                .build();
+    }
+
     public boolean isAlive() {
         return alive;
     }
@@ -42,10 +51,7 @@ public class BotNPC {
     public void spawn(Location location) {
         if (alive) return;
 
-        ResolvableProfile profile = ResolvableProfile.resolvableProfile()
-                .name(name)
-                .uuid(uuid)
-                .build();
+        ResolvableProfile profile = buildProfile();
 
         mannequin = location.getWorld().spawn(location, Mannequin.class, m -> {
             m.setProfile(profile);

@@ -4,14 +4,15 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.List;
 import java.util.Random;
 
-public class MineflayerPlugin extends JavaPlugin implements CommandExecutor {
+public class MineflayerPlugin extends JavaPlugin implements TabExecutor {
 
     private BotManager botManager;
     private final Random random = new Random();
@@ -19,6 +20,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor {
     @Override
     public void onEnable() {
         getCommand("mineflayer").setExecutor(this);
+        getCommand("mineflayer").setTabCompleter(this);
         botManager = new BotManager();
         getLogger().info(getName() + " v" + getPluginMeta().getVersion() + " enabled!");
     }
@@ -79,6 +81,28 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor {
             }
         }
         return false;
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (args.length == 1) {
+            return List.of("add", "delete");
+        }
+        if (args.length == 2) {
+            String prefix = args[1].toLowerCase();
+            if (args[0].equalsIgnoreCase("delete")) {
+                return botManager.getBotNames().stream()
+                    .filter(n -> n.toLowerCase().startsWith(prefix))
+                    .toList();
+            }
+            if (args[0].equalsIgnoreCase("add")) {
+                return Bukkit.getOnlinePlayers().stream()
+                    .map(Player::getName)
+                    .filter(n -> n.toLowerCase().startsWith(prefix))
+                    .toList();
+            }
+        }
+        return List.of();
     }
 
     private Location randomLocation(World world) {
