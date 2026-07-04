@@ -3,3 +3,8 @@ version: ${version}
 main: devgbx9.mineflayer.MineflayerPlugin
 api-version: ${minecraft_version}
 author: DevGBX9
+
+commands:
+  mineflayer:
+    description: Mineflayer plugin commands
+    usage: /<command> test
