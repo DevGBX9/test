@@ -65,7 +65,7 @@ public class NMSHelper {
             gameProfileConstructor = Class.forName("com.mojang.authlib.GameProfile")
                 .getConstructor(UUID.class, String.class);
 
-            Class<?> packetFlowCls = Class.forName("net.minecraft.network.PacketFlow");
+            Class<?> packetFlowCls = resolveClass("net.minecraft.network.PacketFlow", "net.minecraft.network.protocol.PacketFlow");
             packetFlowServerbound = findEnumConstant(packetFlowCls, "SERVERBOUND");
 
             connectionConstructor = Class.forName("net.minecraft.network.Connection")
