@@ -1,6 +1,7 @@
 package devgbx9.mineflayer;
 
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -63,23 +64,22 @@ public class BotListener implements Listener {
         event.setCancelled(true);
         damaged.setFireTicks(0);
 
-        if (event.getDamager() instanceof Player attacker) {
-            double dx = damaged.getLocation().getX() - attacker.getLocation().getX();
-            double dz = damaged.getLocation().getZ() - attacker.getLocation().getZ();
-            if (dx * dx + dz * dz < 1.0E-4) {
-                dx = (Math.random() - Math.random()) * 0.01;
-                dz = (Math.random() - Math.random()) * 0.01;
-            }
-            double len = Math.sqrt(dx * dx + dz * dz);
-            double nx = dx / len;
-            double nz = dz / len;
-            double strength = 0.4;
-
-            Vector vel = damaged.getVelocity();
-            vel.setX(vel.getX() / 2.0 + nx * strength);
-            vel.setY(Math.min(0.4, vel.getY() / 2.0 + strength));
-            vel.setZ(vel.getZ() / 2.0 + nz * strength);
-            damaged.setVelocity(vel);
+        Entity attacker = event.getDamager();
+        double dx = damaged.getLocation().getX() - attacker.getLocation().getX();
+        double dz = damaged.getLocation().getZ() - attacker.getLocation().getZ();
+        if (dx * dx + dz * dz < 1.0E-4) {
+            dx = (Math.random() - Math.random()) * 0.01;
+            dz = (Math.random() - Math.random()) * 0.01;
         }
+        double len = Math.sqrt(dx * dx + dz * dz);
+        double nx = dx / len;
+        double nz = dz / len;
+        double strength = 0.4;
+
+        Vector vel = damaged.getVelocity();
+        vel.setX(vel.getX() / 2.0 + nx * strength);
+        vel.setY(Math.min(0.4, vel.getY() / 2.0 + strength));
+        vel.setZ(vel.getZ() / 2.0 + nz * strength);
+        damaged.setVelocity(vel);
     }
 }
