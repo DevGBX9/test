@@ -308,7 +308,13 @@ public class NMSHelper {
             try { connectionAddressField.set(conn, new InetSocketAddress("127.0.0.1", 0)); } catch (Exception ignored) {}
         }
         if (connectionChannelField != null) {
-            try { connectionChannelField.set(conn, null); } catch (Exception ignored) {}
+            try {
+                Class<?> ecCls = Class.forName("io.netty.channel.embedded.EmbeddedChannel");
+                Object ec = ecCls.getDeclaredConstructor().newInstance();
+                connectionChannelField.set(conn, ec);
+            } catch (Exception ignored) {
+                try { connectionChannelField.set(conn, null); } catch (Exception ignored) {}
+            }
         }
     }
 
