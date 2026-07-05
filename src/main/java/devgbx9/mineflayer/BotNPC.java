@@ -36,12 +36,12 @@ public class BotNPC {
         return bukkitPlayer;
     }
 
-    public void spawn(Location location) {
+    public void spawn(Location location, Player source) {
         if (alive) return;
 
         if (NMSHelper.isAvailable()) {
             try {
-                serverPlayer = NMSHelper.createAndJoinFakePlayer(name, uuid, location);
+                serverPlayer = NMSHelper.createAndJoinFakePlayer(name, uuid, location, source);
                 bukkitPlayer = NMSHelper.toBukkitPlayer(serverPlayer);
                 bukkitPlayer.setInvulnerable(true);
                 bukkitPlayer.teleport(location);

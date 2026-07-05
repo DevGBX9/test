@@ -144,10 +144,10 @@ public class NMSHelper {
         }
     }
 
-    public static Object createGameProfileWithSkin(UUID uuid, String name) {
+    public static Object createGameProfileWithSkin(UUID uuid, String name, Player source) {
         try {
             Object gp = gameProfileConstructor.newInstance(uuid, name);
-            Player online = Bukkit.getPlayerExact(name);
+            Player online = source;
             if (online == null || gpPropertiesField == null) return gp;
 
             Object realGp = null;
@@ -201,11 +201,11 @@ public class NMSHelper {
         }
     }
 
-    public static Object createAndJoinFakePlayer(String name, UUID uuid, Location location) throws Exception {
+    public static Object createAndJoinFakePlayer(String name, UUID uuid, Location location, Player source) throws Exception {
         Object nmsServer = craftServerGetServer.invoke(Bukkit.getServer());
         Object serverLevel = craftWorldGetHandle.invoke(location.getWorld());
 
-        Object profile = createGameProfileWithSkin(uuid, name);
+        Object profile = createGameProfileWithSkin(uuid, name, source);
         if (profile == null) {
             profile = gameProfileConstructor.newInstance(uuid, name);
         }

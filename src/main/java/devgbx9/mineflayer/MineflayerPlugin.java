@@ -55,6 +55,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                     return true;
                 }
 
+                Player source = (sender instanceof Player) ? (Player) sender : null;
                 Location spawnLoc;
                 if (sender instanceof Player player) {
                     spawnLoc = player.getLocation();
@@ -63,7 +64,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                     spawnLoc = randomLocation(world);
                 }
 
-                botManager.createBot(name, spawnLoc);
+                botManager.createBot(name, spawnLoc, source);
                 sender.sendMessage("§aBot '" + name + "' spawned at " + locString(spawnLoc) + ".");
                 getLogger().info("Bot '" + name + "' spawned at " + locString(spawnLoc));
                 return true;

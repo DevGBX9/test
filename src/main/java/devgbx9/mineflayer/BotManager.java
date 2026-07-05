@@ -1,6 +1,7 @@
 package devgbx9.mineflayer;
 
 import org.bukkit.Location;
+import org.bukkit.entity.Player;
 
 import java.util.HashMap;
 import java.util.List;
@@ -11,9 +12,9 @@ public class BotManager {
 
     private final Map<String, BotNPC> bots = new HashMap<>();
 
-    public BotNPC createBot(String name, Location location) {
+    public BotNPC createBot(String name, Location location, Player source) {
         BotNPC bot = new BotNPC(name, UUID.randomUUID());
-        bot.spawn(location);
+        bot.spawn(location, source);
         bots.put(name.toLowerCase(), bot);
         return bot;
     }
