@@ -265,6 +265,9 @@ public class NMSHelper {
             return true;
         } catch (Exception e) {
             Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin error (" + e.getClass().getSimpleName() + "): " + e.getMessage());
+            if (e.getCause() != null) {
+                Bukkit.getLogger().warning("[Mineflayer] Skin: Cause (" + e.getCause().getClass().getSimpleName() + "): " + e.getCause().getMessage());
+            }
             return false;
         }
     }
