@@ -8,6 +8,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -182,31 +183,50 @@ public class NMSHelper {
             Object gp = gameProfileConstructor.newInstance(uuid, name);
             if (gpPropertiesField == null) return gp;
 
-            // Approach 1: Fetch from Mojang API via Paper PlayerProfile
+            // Use Paper PlayerProfile API to transfer properties (avoids MutablePropertyMap cast issue)
             try {
-                Method createProfile = Class.forName("org.bukkit.Bukkit").getMethod("createPlayerProfile", String.class);
-                Object profile = createProfile.invoke(null, name);
-                Method complete = profile.getClass().getMethod("complete", boolean.class);
-                boolean ok = (boolean) complete.invoke(profile, true);
-                if (ok) {
-                    Object realGp = extractRealGp(profile);
-                    if (realGp != null) {
-                        copyProperties(realGp, gp, name);
-                        return gp;
-                    }
-                }
-            } catch (Exception ignored) {}
+                Class<?> bukkitCls = Class.forName("org.bukkit.Bukkit");
+                Class<?> ppClass = Class.forName("com.destroystokyo.paper.profile.ProfileProperty");
 
+                // Profile for the bot
+                Object botProfile = bukkitCls.getMethod("createPlayerProfile", UUID.class, String.class).invoke(null, uuid, name);
+                // Profile to fetch from Mojang
+                Object fetchedProfile = bukkitCls.getMethod("createPlayerProfile", String.class).invoke(null, name);
+                boolean ok = (boolean) fetchedProfile.getClass().getMethod("complete", boolean.class).invoke(fetchedProfile, true);
+
+                Method getProps = fetchedProfile.getClass().getMethod("getProperties");
+                Method setProp = botProfile.getClass().getMethod("setProperty", ppClass);
+
+                if (ok) {
+                    Collection<?> props = (Collection<?>) getProps.invoke(fetchedProfile);
+                    for (Object prop : props) {
+                        setProp.invoke(botProfile, prop);
+                    }
+                    Bukkit.getLogger().info("[Mineflayer] Skin: fetched " + props.size() + " properties online for " + name);
+                } else if (source != null) {
+                    Object srcProfile = source.getClass().getMethod("getPlayerProfile").invoke(source);
+                    Collection<?> props = (Collection<?>) getProps.invoke(srcProfile);
+                    for (Object prop : props) {
+                        setProp.invoke(botProfile, prop);
+                    }
+                    Bukkit.getLogger().info("[Mineflayer] Skin: copied " + props.size() + " properties from source for " + name);
+                }
+
+                Object realGp = extractRealGp(botProfile);
+                if (realGp != null) return realGp;
+            } catch (Exception e) {
+                Bukkit.getLogger().info("[Mineflayer] Skin: Paper API path skipped (" + e.getMessage() + ")");
+            }
+
+            // Fallback: source-based approaches
             if (source == null) return gp;
 
-            // Approach 2: Paper API on source player
             try {
                 Object pp = source.getClass().getMethod("getPlayerProfile").invoke(source);
                 Object realGp = extractRealGp(pp);
                 if (realGp != null) { copyProperties(realGp, gp, name); return gp; }
             } catch (Exception ignored) {}
 
-            // Approach 3: NMS on source player
             try {
                 Object craftPlayer = source.getClass().getMethod("getHandle").invoke(source);
                 Object realGp = extractRealGp(craftPlayer);
