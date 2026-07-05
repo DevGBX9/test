@@ -226,9 +226,9 @@ public class NMSHelper {
         if (MINESKIN_KEY == null || MINESKIN_KEY.isEmpty()) return false;
         try {
             HttpClient client = HttpClient.newHttpClient();
-            // MineSkin V2 uses unified /v2/generate; provide 'url' for URL-based generation
-            String skinUrl = "https://i.imgur.com/kQPrtYw.png";
-            String json = "{\"url\":\"" + skinUrl + "\",\"visibility\":\"public\",\"variant\":\"classic\"}";
+            // MineSkin V2: use known real UUID so MineSkin fetches skin from Mojang
+            String knownUuid = "069a79f4-44e9-4726-a5be-fca90e38aaf5"; // Notch
+            String json = "{\"user\":\"" + knownUuid + "\",\"visibility\":\"public\",\"variant\":\"classic\"}";
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://api.mineskin.org/v2/generate"))
                 .header("Content-Type", "application/json")
@@ -263,7 +263,7 @@ public class NMSHelper {
             Bukkit.getLogger().info("[Mineflayer] Skin: applied from MineSkin for " + logName);
             return true;
         } catch (Exception e) {
-            Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin error: " + e.getMessage());
+            Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin error (" + e.getClass().getSimpleName() + "): " + e.getMessage());
             return false;
         }
     }
