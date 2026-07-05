@@ -160,6 +160,79 @@ public class NMSHelper {
         return null;
     }
 
+    private static Method findPutMethod(Object propsObj) {
+        for (Method m : propsObj.getClass().getMethods()) {
+            if (m.getName().equals("put") && m.getParameterCount() == 2) return m;
+        }
+        return null;
+    }
+
+    private static int putPropsFromArray(Object[] propsArr, Object gpProps, String name) throws Exception {
+        Class<?> ppCls = Class.forName("com.destroystokyo.paper.profile.ProfileProperty");
+        Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
+        Constructor<?> propCtor = propCls.getConstructor(String.class, String.class, String.class);
+        Method ppGetName = ppCls.getMethod("getName");
+        Method ppGetValue = ppCls.getMethod("getValue");
+        Method ppGetSignature = ppCls.getMethod("getSignature");
+        Method putMethod = findPutMethod(gpProps);
+        if (putMethod == null) return 0;
+        int cnt = 0;
+        for (Object pp : propsArr) {
+            String pName = (String) ppGetName.invoke(pp);
+            String pValue = (String) ppGetValue.invoke(pp);
+            String pSig = (String) ppGetSignature.invoke(pp);
+            Object property = propCtor.newInstance(pName, pValue, pSig);
+            putMethod.invoke(gpProps, pName, property);
+            cnt++;
+        }
+        return cnt;
+    }
+
+    public static Object createGameProfileWithSkin(UUID uuid, String name, Player source) {
+        try {
+            Object gp = gameProfileConstructor.newInstance(uuid, name);
+            if (gpPropertiesField == null) return gp;
+            Object gpProps = gpPropertiesField.get(gp);
+            if (gpProps == null) return gp;
+
+            // Get properties from source's PlayerProfile directly (avoids Paper API blocks and MutablePropertyMap)
+            if (source != null) {
+                try {
+                    Object pp = source.getClass().getMethod("getPlayerProfile").invoke(source);
+                    Object propsRaw = pp.getClass().getMethod("getProperties").invoke(pp);
+                    Object[] propsArr = (Object[]) propsRaw.getClass().getMethod("toArray").invoke(propsRaw);
+                    if (propsArr.length > 0) {
+                        int cnt = putPropsFromArray(propsArr, gpProps, name);
+                        if (cnt > 0) {
+                            Bukkit.getLogger().info("[Mineflayer] Skin: applied " + cnt + " properties for " + name);
+                            return gp;
+                        }
+                    }
+                } catch (Exception e) {
+                    Bukkit.getLogger().warning("[Mineflayer] Skin: PlayerProfile path: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                }
+            }
+
+            // Last resort: copy via GameProfile field (handles both Map and non-Map PropertyMap)
+            if (source != null) {
+                try {
+                    Object pp = source.getClass().getMethod("getPlayerProfile").invoke(source);
+                    Object realGp = extractRealGp(pp);
+                    if (realGp != null) { copyProperties(realGp, gp, name); return gp; }
+                } catch (Exception ignored) {}
+                try {
+                    Object craftPlayer = source.getClass().getMethod("getHandle").invoke(source);
+                    Object realGp = extractRealGp(craftPlayer);
+                    if (realGp != null) { copyProperties(realGp, gp, name); return gp; }
+                } catch (Exception ignored) {}
+            }
+
+            return gp;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private static void copyProperties(Object fromGp, Object toGp, String name) {
         if (fromGp == null || toGp == null) return;
         try {
@@ -170,7 +243,12 @@ public class NMSHelper {
             if (fromProps instanceof Map && toProps instanceof Map) {
                 cnt = ((Map) fromProps).size();
                 ((Map) toProps).putAll((Map) fromProps);
-            } else if (toProps instanceof Map) {
+            } else {
+                Method putMethod = findPutMethod(toProps);
+                if (putMethod == null) {
+                    Bukkit.getLogger().warning("[Mineflayer] Skin: no put method on " + toProps.getClass().getName());
+                    return;
+                }
                 Object entriesObj = fromProps.getClass().getMethod("entrySet").invoke(fromProps);
                 Object[] entries = (Object[]) entriesObj.getClass().getMethod("toArray").invoke(entriesObj);
                 Class<?> ppCls = Class.forName("com.destroystokyo.paper.profile.ProfileProperty");
@@ -179,7 +257,6 @@ public class NMSHelper {
                 Method ppGetName = ppCls.getMethod("getName");
                 Method ppGetValue = ppCls.getMethod("getValue");
                 Method ppGetSignature = ppCls.getMethod("getSignature");
-                Method targetPut = toProps.getClass().getMethod("put", Object.class, Object.class);
                 for (Object entry : entries) {
                     String key = (String) entry.getClass().getMethod("getKey").invoke(entry);
                     Object val = entry.getClass().getMethod("getValue").invoke(entry);
@@ -187,103 +264,15 @@ public class NMSHelper {
                     String pValue = (String) ppGetValue.invoke(val);
                     String pSig = (String) ppGetSignature.invoke(val);
                     Object property = propCtor.newInstance(pName, pValue, pSig);
-                    targetPut.invoke(toProps, key, property);
+                    putMethod.invoke(toProps, key, property);
                     cnt++;
                 }
-            } else {
-                Bukkit.getLogger().warning("[Mineflayer] Skin: type mismatch from=" + (fromProps != null ? fromProps.getClass().getName() : "null") + " to=" + (toProps != null ? toProps.getClass().getName() : "null"));
-                return;
             }
             if (cnt > 0) {
                 Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
             }
         } catch (Exception e) {
             Bukkit.getLogger().warning("[Mineflayer] Skin: copy failed: " + e);
-        }
-    }
-
-    public static Object createGameProfileWithSkin(UUID uuid, String name, Player source) {
-        try {
-            Object gp = gameProfileConstructor.newInstance(uuid, name);
-            if (gpPropertiesField == null) return gp;
-
-            // Use Paper PlayerProfile API via pure reflection (avoids classloader type casting issues)
-            try {
-                Class<?> bukkitCls = Class.forName("org.bukkit.Bukkit");
-                Class<?> ppClass = Class.forName("com.destroystokyo.paper.profile.ProfileProperty");
-
-                Object fetchedProfile = bukkitCls.getMethod("createPlayerProfile", String.class).invoke(null, name);
-                Object okRaw = fetchedProfile.getClass().getMethod("complete", boolean.class).invoke(fetchedProfile, true);
-                boolean ok = Boolean.TRUE.equals(okRaw);
-
-                Object propsSource;
-                if (ok) {
-                    propsSource = fetchedProfile;
-                } else if (source != null) {
-                    propsSource = source.getClass().getMethod("getPlayerProfile").invoke(source);
-                } else {
-                    return gp;
-                }
-
-                Object gpProps = gpPropertiesField.get(gp);
-                if (gpProps == null) return gp;
-
-                Method getProps = propsSource.getClass().getMethod("getProperties");
-                Object propsRaw = getProps.invoke(propsSource);
-                Object[] propsArr = (Object[]) propsRaw.getClass().getMethod("toArray").invoke(propsRaw);
-
-                if (propsArr.length == 0) {
-                    if (source != null) {
-                        propsSource = source.getClass().getMethod("getPlayerProfile").invoke(source);
-                        propsRaw = getProps.invoke(propsSource);
-                        propsArr = (Object[]) propsRaw.getClass().getMethod("toArray").invoke(propsRaw);
-                    }
-                    if (propsArr.length == 0) return gp;
-                }
-
-                // Convert each ProfileProperty to com.mojang.authlib.properties.Property and put into bot's PropertyMap
-                Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
-                Constructor<?> propCtor = propCls.getConstructor(String.class, String.class, String.class);
-                Method ppGetName = ppClass.getMethod("getName");
-                Method ppGetValue = ppClass.getMethod("getValue");
-                Method ppGetSignature = ppClass.getMethod("getSignature");
-                Method putMethod = gpProps.getClass().getMethod("put", Object.class, Object.class);
-
-                for (Object pp : propsArr) {
-                    String pName = (String) ppGetName.invoke(pp);
-                    String pValue = (String) ppGetValue.invoke(pp);
-                    String pSig = (String) ppGetSignature.invoke(pp);
-                    Object property = propCtor.newInstance(pName, pValue, pSig);
-                    putMethod.invoke(gpProps, pName, property);
-                }
-                Bukkit.getLogger().info("[Mineflayer] Skin: applied " + propsArr.length + " properties for " + name);
-                return gp;
-            } catch (Exception e) {
-                Bukkit.getLogger().warning("[Mineflayer] Skin: Paper API path skipped (" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")");
-                if (e.getCause() != null) {
-                    Bukkit.getLogger().warning("[Mineflayer] Skin:   cause=" + e.getCause().getClass().getSimpleName() + ": " + e.getCause().getMessage());
-                }
-            }
-
-            // Fallback: source-based approaches
-            if (source == null) return gp;
-
-            try {
-                Object pp = source.getClass().getMethod("getPlayerProfile").invoke(source);
-                Object realGp = extractRealGp(pp);
-                if (realGp != null) { copyProperties(realGp, gp, name); return gp; }
-            } catch (Exception ignored) {}
-
-            try {
-                Object craftPlayer = source.getClass().getMethod("getHandle").invoke(source);
-                Object realGp = extractRealGp(craftPlayer);
-                if (realGp != null) { copyProperties(realGp, gp, name); return gp; }
-            } catch (Exception ignored) {}
-
-            Bukkit.getLogger().warning("[Mineflayer] Skin: could not find source GameProfile for " + name);
-            return gp;
-        } catch (Exception e) {
-            return null;
         }
     }
 
