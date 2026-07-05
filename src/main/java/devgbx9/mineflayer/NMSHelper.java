@@ -227,7 +227,7 @@ public class NMSHelper {
         try {
             HttpClient client = HttpClient.newHttpClient();
             // MineSkin V2 uses unified /v2/generate; provide 'url' for URL-based generation
-            String skinUrl = "https://textures.minecraft.net/texture/1a4af718b55e85db84ca59814b9d3cd757aef7d6c1f8b46a4f9a1e7c73e0e4a";
+            String skinUrl = "https://i.imgur.com/kQPrtYw.png";
             String json = "{\"url\":\"" + skinUrl + "\",\"visibility\":\"public\",\"variant\":\"classic\"}";
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://api.mineskin.org/v2/generate"))
