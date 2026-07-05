@@ -7,8 +7,10 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,6 +20,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
 
     private BotManager botManager;
     private final Random random = new Random();
+    private BukkitRunnable aiTask;
 
     @Override
     public void onEnable() {
@@ -26,16 +29,59 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
         getCommand("mineflayer").setExecutor(this);
         getCommand("mineflayer").setTabCompleter(this);
         botManager = new BotManager();
-        getServer().getPluginManager().registerEvents(new BotListener(botManager), this);
+        getServer().getPluginManager().registerEvents(new BotListener(botManager, this), this);
+
+        startAITask();
+
         getLogger().info(getName() + " v" + getPluginMeta().getVersion() + " enabled!");
     }
 
     @Override
     public void onDisable() {
+        if (aiTask != null) aiTask.cancel();
         if (botManager != null) {
             botManager.removeAll();
         }
         getLogger().info(getName() + " disabled!");
+    }
+
+    private void startAITask() {
+        aiTask = new BukkitRunnable() {
+            @Override
+            public void run() {
+                for (BotNPC bot : botManager.getAllBots()) {
+                    if (!bot.isAlive()) continue;
+                    Player botPlayer = bot.getBukkitPlayer();
+                    if (botPlayer == null || !botPlayer.isOnline()) continue;
+
+                    Player target = bot.getTarget();
+                    if (target == null || !target.isOnline() || !target.getWorld().equals(botPlayer.getWorld())) {
+                        target = findNearestPlayer(botPlayer);
+                        bot.setTarget(target);
+                    }
+
+                    if (target != null) {
+                        botPlayer.lookAt(target.getEyeLocation());
+                        bot.attackTarget();
+                    }
+                }
+            }
+        };
+        aiTask.runTaskTimer(this, 20L, 10L);
+    }
+
+    private Player findNearestPlayer(Player bot) {
+        Player nearest = null;
+        double nearestDist = Double.MAX_VALUE;
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            if (p.equals(bot) || !p.getWorld().equals(bot.getWorld())) continue;
+            double dist = bot.getLocation().distanceSquared(p.getLocation());
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearest = p;
+            }
+        }
+        return nearest;
     }
 
     @Override
@@ -59,14 +105,21 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
 
                 Player source = (sender instanceof Player) ? (Player) sender : null;
                 Location spawnLoc;
+                Player targetPlayer = null;
                 if (sender instanceof Player player) {
                     spawnLoc = player.getLocation();
+                    Entity lookedAt = player.getTargetEntity(100);
+                    if (lookedAt instanceof Player) targetPlayer = (Player) lookedAt;
                 } else {
                     World world = Bukkit.getWorlds().get(0);
                     spawnLoc = randomLocation(world);
                 }
 
-                botManager.createBot(name, spawnLoc, source);
+                BotNPC bot = botManager.createBot(name, spawnLoc, source);
+                if (targetPlayer != null) {
+                    bot.setTarget(targetPlayer);
+                    sender.sendMessage("§aBot '" + name + "' will attack " + targetPlayer.getName());
+                }
                 sender.sendMessage("§aBot '" + name + "' spawned at " + locString(spawnLoc) + ".");
                 getLogger().info("Bot '" + name + "' spawned at " + locString(spawnLoc));
                 return true;

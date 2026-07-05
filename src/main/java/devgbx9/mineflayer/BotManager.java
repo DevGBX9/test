@@ -46,4 +46,8 @@ public class BotManager {
     public List<String> getBotNames() {
         return List.copyOf(bots.keySet());
     }
+
+    public List<BotNPC> getAllBots() {
+        return List.copyOf(bots.values());
+    }
 }

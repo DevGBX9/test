@@ -161,12 +161,21 @@ public class NMSHelper {
                 Object listener = gamePacketListenerConstructor.newInstance(nmsServer, conn, serverPlayer, cookie);
                 serverPlayerConnectionField.set(serverPlayer, listener);
                 // Configure network pipeline so disconnect() triggers PlayerQuitEvent (/kick fix)
-                try {
-                    Method cfg = connectionCls.getMethod("configureSerializationAfterHandshake", listener.getClass());
-                    cfg.invoke(conn, listener);
-                    Bukkit.getLogger().info("[Mineflayer] Packet pipeline configured for " + name);
-                } catch (Exception ex) {
-                    Bukkit.getLogger().warning("[Mineflayer] configureSerialization failed for " + name + ": " + ex.getMessage());
+                String[] configMethods = {"configureSerializationAfterHandshake", "setupSerialization", "configureSerialization", "initSerialization"};
+                Method cfgMethod = null;
+                for (String mn : configMethods) {
+                    try {
+                        cfgMethod = connectionCls.getMethod(mn, listener.getClass());
+                        break;
+                    } catch (NoSuchMethodException ignored) {}
+                }
+                if (cfgMethod != null) {
+                    try {
+                        cfgMethod.invoke(conn, listener);
+                        Bukkit.getLogger().info("[Mineflayer] Packet pipeline configured for " + name);
+                    } catch (Exception ex) {
+                        Bukkit.getLogger().warning("[Mineflayer] configureSerialization invoke failed for " + name + ": " + ex.getMessage());
+                    }
                 }
             } catch (Exception e) {
                 Bukkit.getLogger().warning("[Mineflayer] set listener failed: " + e.getMessage());

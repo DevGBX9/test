@@ -13,11 +13,13 @@ public class BotNPC {
     private Object serverPlayer;
     private Player bukkitPlayer;
     private boolean alive;
+    private Player target;
 
     public BotNPC(String name, UUID uuid) {
         this.name = name;
         this.uuid = uuid;
         this.alive = false;
+        this.target = null;
     }
 
     public String getName() {
@@ -36,6 +38,14 @@ public class BotNPC {
         return bukkitPlayer;
     }
 
+    public void setTarget(Player target) {
+        this.target = target;
+    }
+
+    public Player getTarget() {
+        return target;
+    }
+
     public void spawn(Location location, Player source) {
         if (alive) return;
 
@@ -43,8 +53,8 @@ public class BotNPC {
             try {
                 serverPlayer = NMSHelper.createAndJoinFakePlayer(name, uuid, location, source);
                 bukkitPlayer = NMSHelper.toBukkitPlayer(serverPlayer);
-                bukkitPlayer.setInvulnerable(true);
                 bukkitPlayer.teleport(location);
+                bukkitPlayer.setMaximumNoDamageTicks(0);
                 NMSHelper.broadcastJoinMessage(name);
                 Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' spawned at " + location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ());
                 alive = true;
@@ -60,6 +70,7 @@ public class BotNPC {
     public void remove() {
         if (!alive) return;
 
+        target = null;
         if (bukkitPlayer != null) {
             try { bukkitPlayer.kickPlayer("Bot removed"); } catch (Exception ignored) {}
         }
@@ -70,5 +81,16 @@ public class BotNPC {
         serverPlayer = null;
         bukkitPlayer = null;
         alive = false;
+    }
+
+    public void attackTarget() {
+        if (!alive || bukkitPlayer == null || !bukkitPlayer.isOnline()) return;
+        if (target == null || !target.isOnline() || !target.getWorld().equals(bukkitPlayer.getWorld())) return;
+
+        double dist = bukkitPlayer.getLocation().distance(target.getLocation());
+        if (dist <= 5) {
+            bukkitPlayer.attack(target);
+            bukkitPlayer.lookAt(target.getEyeLocation());
+        }
     }
 }

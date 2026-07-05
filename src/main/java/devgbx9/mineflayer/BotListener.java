@@ -1,18 +1,23 @@
 package devgbx9.mineflayer;
 
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.Plugin;
 
 public class BotListener implements Listener {
 
     private final BotManager botManager;
+    private final Plugin plugin;
 
-    public BotListener(BotManager botManager) {
+    public BotListener(BotManager botManager, Plugin plugin) {
         this.botManager = botManager;
+        this.plugin = plugin;
     }
 
     @EventHandler
@@ -46,5 +51,19 @@ public class BotListener implements Listener {
         botManager.removeBot(targetName);
         event.getPlayer().sendMessage("§aBot '" + targetName + "' removed.");
         Bukkit.getLogger().info("[Mineflayer] Bot '" + targetName + "' removed via /kick interception");
+    }
+
+    @EventHandler
+    public void onEntityDamage(EntityDamageByEntityEvent event) {
+        if (!(event.getEntity() instanceof Player damaged)) return;
+        BotNPC bot = botManager.getBot(damaged.getName());
+        if (bot == null || !bot.isAlive()) return;
+
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (damaged.isOnline()) {
+                damaged.setHealth(damaged.getMaxHealth());
+                damaged.setFireTicks(0);
+            }
+        }, 1L);
     }
 }
