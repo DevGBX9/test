@@ -86,7 +86,12 @@ public class NMSHelper {
 
             gpClass = Class.forName("com.mojang.authlib.GameProfile");
             gameProfileConstructor = gpClass.getConstructor(UUID.class, String.class);
-            gpGetProperties = gpClass.getMethod("getProperties");
+            for (String mn : new String[]{"getProperties", "properties", "getProfileProperties"}) {
+                try { gpGetProperties = gpClass.getMethod(mn); break; } catch (NoSuchMethodException ignored) {}
+            }
+            if (gpGetProperties == null) {
+                Bukkit.getLogger().warning("[Mineflayer] Cannot find GameProfile properties method, skin copy disabled");
+            }
 
             Class<?> packetFlowCls = resolveClass("net.minecraft.network.PacketFlow", "net.minecraft.network.protocol.PacketFlow");
             if (packetFlowCls != null) {
@@ -128,23 +133,24 @@ public class NMSHelper {
     public static Object createGameProfileWithSkin(UUID uuid, String name) {
         try {
             Object gp = gameProfileConstructor.newInstance(uuid, name);
-            Player online = Bukkit.getPlayerExact(name);
-            if (online != null) {
-                Object craftPlayer = online.getClass().getMethod("getHandle").invoke(online);
-                Object realGp = null;
-                for (Class<?> c = craftPlayer.getClass(); c != null; c = c.getSuperclass()) {
-                    try {
-                        Field f = c.getDeclaredField("gameProfile");
-                        f.setAccessible(true);
-                        realGp = f.get(craftPlayer);
-                        break;
-                    } catch (NoSuchFieldException ignored) {}
-                }
-                if (realGp != null) {
-                    Object realProps = gpGetProperties.invoke(realGp);
-                    Object botProps = gpGetProperties.invoke(gp);
-                    Method putAll = botProps.getClass().getMethod("putAll", Map.class);
-                    putAll.invoke(botProps, realProps);
+            if (gpGetProperties != null) {
+                Player online = Bukkit.getPlayerExact(name);
+                if (online != null) {
+                    Object craftPlayer = online.getClass().getMethod("getHandle").invoke(online);
+                    Object realGp = null;
+                    for (Class<?> c = craftPlayer.getClass(); c != null; c = c.getSuperclass()) {
+                        try {
+                            Field f = c.getDeclaredField("gameProfile");
+                            f.setAccessible(true);
+                            realGp = f.get(craftPlayer);
+                            break;
+                        } catch (NoSuchFieldException ignored) {}
+                    }
+                    if (realGp != null) {
+                        Object realProps = gpGetProperties.invoke(realGp);
+                        Object botProps = gpGetProperties.invoke(gp);
+                        Map.class.getMethod("putAll", Map.class).invoke(botProps, realProps);
+                    }
                 }
             }
             return gp;
