@@ -9,7 +9,6 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
-import org.bukkit.util.Vector;
 
 public class BotListener implements Listener {
 
@@ -64,8 +63,15 @@ public class BotListener implements Listener {
         damaged.setFireTicks(0);
 
         if (event.getDamager() instanceof Player attacker) {
-            Vector dir = damaged.getLocation().toVector().subtract(attacker.getLocation().toVector()).normalize();
-            damaged.teleport(damaged.getLocation().add(dir.multiply(1.5)).add(0, 0.3, 0));
+            double dx = damaged.getLocation().getX() - attacker.getLocation().getX();
+            double dz = damaged.getLocation().getZ() - attacker.getLocation().getZ();
+            if (dx * dx + dz * dz < 1.0E-4) {
+                dx = (Math.random() - Math.random()) * 0.01;
+                dz = (Math.random() - Math.random()) * 0.01;
+            }
+            try {
+                NMSHelper.applyKnockback(bot.getServerPlayer(), 0.4, dx, dz);
+            } catch (Exception ignored) {}
         }
     }
 }

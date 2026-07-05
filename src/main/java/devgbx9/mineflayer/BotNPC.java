@@ -47,6 +47,10 @@ public class BotNPC {
         return target;
     }
 
+    public Object getServerPlayer() {
+        return serverPlayer;
+    }
+
     public void spawn(Location location, Player source) {
         if (alive) return;
 
@@ -83,7 +87,19 @@ public class BotNPC {
         alive = false;
     }
 
-    public void faceTarget() {
+    public void tick() {
+        if (!alive || bukkitPlayer == null || !bukkitPlayer.isOnline()) return;
+
+        faceTarget();
+
+        if (serverPlayer != null) {
+            try {
+                NMSHelper.simulateMovement(serverPlayer);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private void faceTarget() {
         if (!alive || bukkitPlayer == null || !bukkitPlayer.isOnline()) return;
         if (target == null || !target.isOnline() || !target.getWorld().equals(bukkitPlayer.getWorld())) return;
 

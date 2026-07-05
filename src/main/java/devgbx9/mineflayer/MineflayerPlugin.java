@@ -60,13 +60,11 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                         bot.setTarget(target);
                     }
 
-                    if (target != null) {
-                        bot.faceTarget();
-                    }
+                    bot.tick();
                 }
             }
         };
-        aiTask.runTaskTimer(this, 20L, 10L);
+        aiTask.runTaskTimer(this, 20L, 1L);
     }
 
     private Player findNearestPlayer(Player bot) {
