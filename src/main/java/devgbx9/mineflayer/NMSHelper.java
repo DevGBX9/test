@@ -8,7 +8,6 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -166,15 +165,40 @@ public class NMSHelper {
         try {
             Object fromProps = gpPropertiesField.get(fromGp);
             Object toProps = gpPropertiesField.get(toGp);
+            if (toProps == null) return;
+            int cnt = 0;
             if (fromProps instanceof Map && toProps instanceof Map) {
-                int cnt = ((Map) fromProps).size();
+                cnt = ((Map) fromProps).size();
                 ((Map) toProps).putAll((Map) fromProps);
-                Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
+            } else if (toProps instanceof Map) {
+                Object entriesObj = fromProps.getClass().getMethod("entrySet").invoke(fromProps);
+                Object[] entries = (Object[]) entriesObj.getClass().getMethod("toArray").invoke(entriesObj);
+                Class<?> ppCls = Class.forName("com.destroystokyo.paper.profile.ProfileProperty");
+                Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
+                Constructor<?> propCtor = propCls.getConstructor(String.class, String.class, String.class);
+                Method ppGetName = ppCls.getMethod("getName");
+                Method ppGetValue = ppCls.getMethod("getValue");
+                Method ppGetSignature = ppCls.getMethod("getSignature");
+                Method targetPut = toProps.getClass().getMethod("put", Object.class, Object.class);
+                for (Object entry : entries) {
+                    String key = (String) entry.getClass().getMethod("getKey").invoke(entry);
+                    Object val = entry.getClass().getMethod("getValue").invoke(entry);
+                    String pName = (String) ppGetName.invoke(val);
+                    String pValue = (String) ppGetValue.invoke(val);
+                    String pSig = (String) ppGetSignature.invoke(val);
+                    Object property = propCtor.newInstance(pName, pValue, pSig);
+                    targetPut.invoke(toProps, key, property);
+                    cnt++;
+                }
             } else {
                 Bukkit.getLogger().warning("[Mineflayer] Skin: type mismatch from=" + (fromProps != null ? fromProps.getClass().getName() : "null") + " to=" + (toProps != null ? toProps.getClass().getName() : "null"));
+                return;
+            }
+            if (cnt > 0) {
+                Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
             }
         } catch (Exception e) {
-            Bukkit.getLogger().warning("[Mineflayer] Skin: copy failed: " + e.getMessage());
+            Bukkit.getLogger().warning("[Mineflayer] Skin: copy failed: " + e);
         }
     }
 
@@ -183,13 +207,14 @@ public class NMSHelper {
             Object gp = gameProfileConstructor.newInstance(uuid, name);
             if (gpPropertiesField == null) return gp;
 
-            // Use Paper PlayerProfile API: fetch ProfileProperties, convert to Mojang Properties, put directly into bot's PropertyMap
+            // Use Paper PlayerProfile API via pure reflection (avoids classloader type casting issues)
             try {
                 Class<?> bukkitCls = Class.forName("org.bukkit.Bukkit");
                 Class<?> ppClass = Class.forName("com.destroystokyo.paper.profile.ProfileProperty");
 
                 Object fetchedProfile = bukkitCls.getMethod("createPlayerProfile", String.class).invoke(null, name);
-                boolean ok = (boolean) fetchedProfile.getClass().getMethod("complete", boolean.class).invoke(fetchedProfile, true);
+                Object okRaw = fetchedProfile.getClass().getMethod("complete", boolean.class).invoke(fetchedProfile, true);
+                boolean ok = Boolean.TRUE.equals(okRaw);
 
                 Object propsSource;
                 if (ok) {
@@ -204,36 +229,40 @@ public class NMSHelper {
                 if (gpProps == null) return gp;
 
                 Method getProps = propsSource.getClass().getMethod("getProperties");
-                Collection<?> props = (Collection<?>) getProps.invoke(propsSource);
+                Object propsRaw = getProps.invoke(propsSource);
+                Object[] propsArr = (Object[]) propsRaw.getClass().getMethod("toArray").invoke(propsRaw);
 
-                if (props.isEmpty()) {
+                if (propsArr.length == 0) {
                     if (source != null) {
                         propsSource = source.getClass().getMethod("getPlayerProfile").invoke(source);
-                        props = (Collection<?>) getProps.invoke(propsSource);
+                        propsRaw = getProps.invoke(propsSource);
+                        propsArr = (Object[]) propsRaw.getClass().getMethod("toArray").invoke(propsRaw);
                     }
-                    if (props.isEmpty()) return gp;
+                    if (propsArr.length == 0) return gp;
                 }
 
                 // Convert each ProfileProperty to com.mojang.authlib.properties.Property and put into bot's PropertyMap
                 Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
                 Constructor<?> propCtor = propCls.getConstructor(String.class, String.class, String.class);
-                Method gpName = ppClass.getMethod("getName");
-                Method gpValue = ppClass.getMethod("getValue");
-                Method gpSignature = ppClass.getMethod("getSignature");
+                Method ppGetName = ppClass.getMethod("getName");
+                Method ppGetValue = ppClass.getMethod("getValue");
+                Method ppGetSignature = ppClass.getMethod("getSignature");
+                Method putMethod = gpProps.getClass().getMethod("put", Object.class, Object.class);
 
-                @SuppressWarnings("unchecked")
-                Map<String, Object> propMap = (Map<String, Object>) gpProps;
-                for (Object pp : props) {
-                    String pName = (String) gpName.invoke(pp);
-                    String pValue = (String) gpValue.invoke(pp);
-                    String pSig = (String) gpSignature.invoke(pp);
+                for (Object pp : propsArr) {
+                    String pName = (String) ppGetName.invoke(pp);
+                    String pValue = (String) ppGetValue.invoke(pp);
+                    String pSig = (String) ppGetSignature.invoke(pp);
                     Object property = propCtor.newInstance(pName, pValue, pSig);
-                    propMap.put(pName, property);
+                    putMethod.invoke(gpProps, pName, property);
                 }
-                Bukkit.getLogger().info("[Mineflayer] Skin: applied " + props.size() + " properties for " + name);
+                Bukkit.getLogger().info("[Mineflayer] Skin: applied " + propsArr.length + " properties for " + name);
                 return gp;
             } catch (Exception e) {
-                Bukkit.getLogger().info("[Mineflayer] Skin: Paper API path skipped (" + e.getMessage() + ")");
+                Bukkit.getLogger().warning("[Mineflayer] Skin: Paper API path skipped (" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")");
+                if (e.getCause() != null) {
+                    Bukkit.getLogger().warning("[Mineflayer] Skin:   cause=" + e.getCause().getClass().getSimpleName() + ": " + e.getCause().getMessage());
+                }
             }
 
             // Fallback: source-based approaches
