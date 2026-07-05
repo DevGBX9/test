@@ -160,11 +160,24 @@ public class NMSHelper {
         return null;
     }
 
-    private static Method findPutMethod(Object propsObj) {
-        for (Method m : propsObj.getClass().getMethods()) {
-            if (m.getName().equals("put") && m.getParameterCount() == 2) return m;
+    private static Method findWriteMethod(Object propsObj) {
+        String[] names = {"put", "add", "setProperty", "putProperty"};
+        for (String name : names) {
+            for (int pc = 1; pc <= 3; pc++) {
+                for (Method m : propsObj.getClass().getMethods()) {
+                    if (m.getName().equals(name) && m.getParameterCount() == pc) return m;
+                }
+            }
         }
         return null;
+    }
+
+    private static void logMethods(Object obj, String label) {
+        StringBuilder sb = new StringBuilder("[Mineflayer] " + label + " methods (" + obj.getClass().getName() + "): ");
+        for (Method m : obj.getClass().getMethods()) {
+            sb.append(m.getName()).append("(").append(m.getParameterCount()).append(") ");
+        }
+        Bukkit.getLogger().info(sb.toString());
     }
 
     private static int putPropsFromArray(Object[] propsArr, Object gpProps, String name) throws Exception {
@@ -174,15 +187,19 @@ public class NMSHelper {
         Method ppGetName = ppCls.getMethod("getName");
         Method ppGetValue = ppCls.getMethod("getValue");
         Method ppGetSignature = ppCls.getMethod("getSignature");
-        Method putMethod = findPutMethod(gpProps);
-        if (putMethod == null) return 0;
+        Method writeMethod = findWriteMethod(gpProps);
+        if (writeMethod == null) return 0;
         int cnt = 0;
         for (Object pp : propsArr) {
             String pName = (String) ppGetName.invoke(pp);
             String pValue = (String) ppGetValue.invoke(pp);
             String pSig = (String) ppGetSignature.invoke(pp);
             Object property = propCtor.newInstance(pName, pValue, pSig);
-            putMethod.invoke(gpProps, pName, property);
+            if (writeMethod.getParameterCount() == 2) {
+                writeMethod.invoke(gpProps, pName, property);
+            } else {
+                writeMethod.invoke(gpProps, property);
+            }
             cnt++;
         }
         return cnt;
@@ -195,13 +212,23 @@ public class NMSHelper {
             Object gpProps = gpPropertiesField.get(gp);
             if (gpProps == null) return gp;
 
+            // Debug: log available methods on gpProps and source properties
+            if (source != null) {
+                try {
+                    Object pp = source.getClass().getMethod("getPlayerProfile").invoke(source);
+                    Object srcProps = pp.getClass().getMethod("getProperties").invoke(pp);
+                    if (srcProps != null) logMethods(srcProps, "source props");
+                } catch (Exception ign) {}
+            }
+            logMethods(gpProps, "bot gpProps");
+
             // Get properties from source's PlayerProfile directly (avoids Paper API blocks and MutablePropertyMap)
             if (source != null) {
                 try {
                     Object pp = source.getClass().getMethod("getPlayerProfile").invoke(source);
                     Object propsRaw = pp.getClass().getMethod("getProperties").invoke(pp);
-                    Object[] propsArr = (Object[]) propsRaw.getClass().getMethod("toArray").invoke(propsRaw);
-                    if (propsArr.length > 0) {
+                    Object[] propsArr = readPropsArray(propsRaw);
+                    if (propsArr != null && propsArr.length > 0) {
                         int cnt = putPropsFromArray(propsArr, gpProps, name);
                         if (cnt > 0) {
                             Bukkit.getLogger().info("[Mineflayer] Skin: applied " + cnt + " properties for " + name);
@@ -233,40 +260,120 @@ public class NMSHelper {
         }
     }
 
+    private static Object[] readPropsArray(Object props) throws Exception {
+        // Try entrySet().toArray()
+        try {
+            Object es = props.getClass().getMethod("entrySet").invoke(props);
+            return (Object[]) es.getClass().getMethod("toArray").invoke(es);
+        } catch (NoSuchMethodException ign) {}
+        // Try values().toArray()
+        try {
+            Object vals = props.getClass().getMethod("values").invoke(props);
+            return (Object[]) vals.getClass().getMethod("toArray").invoke(vals);
+        } catch (NoSuchMethodException ign) {}
+        // Try toArray() directly
+        try {
+            return (Object[]) props.getClass().getMethod("toArray").invoke(props);
+        } catch (NoSuchMethodException ign) {}
+        return null;
+    }
+
     private static void copyProperties(Object fromGp, Object toGp, String name) {
         if (fromGp == null || toGp == null) return;
         try {
             Object fromProps = gpPropertiesField.get(fromGp);
             Object toProps = gpPropertiesField.get(toGp);
             if (toProps == null) return;
-            int cnt = 0;
+            // Try fast-path: both are Map
             if (fromProps instanceof Map && toProps instanceof Map) {
-                cnt = ((Map) fromProps).size();
+                int cnt = ((Map) fromProps).size();
                 ((Map) toProps).putAll((Map) fromProps);
-            } else {
-                Method putMethod = findPutMethod(toProps);
-                if (putMethod == null) {
-                    Bukkit.getLogger().warning("[Mineflayer] Skin: no put method on " + toProps.getClass().getName());
+                if (cnt > 0) Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
+                return;
+            }
+            // Try to read properties from source
+            Object[] entries = readPropsArray(fromProps);
+            if (entries == null) {
+                logMethods(fromProps, "source props");
+                Bukkit.getLogger().warning("[Mineflayer] Skin: cannot iterate source " + fromProps.getClass().getName());
+                return;
+            }
+            // Try to find a write method on target
+            Method writeMethod = findWriteMethod(toProps);
+            if (writeMethod == null) {
+                // Last resort: direct field replacement with LinkedHashMap
+                logMethods(toProps, "target props");
+                Bukkit.getLogger().info("[Mineflayer] Skin: no write method on " + toProps.getClass().getName() + ", trying direct field replacement");
+                try {
+                    Map<String, Object> newMap = new java.util.LinkedHashMap<>();
+                    // Populate newMap from source properties as raw objects
+                    Object[] rawEntries = readPropsArray(fromProps);
+                    if (rawEntries != null) {
+                        for (Object entry : rawEntries) {
+                            String key;
+                            Object val;
+                            try {
+                                key = (String) entry.getClass().getMethod("getKey").invoke(entry);
+                                val = entry.getClass().getMethod("getValue").invoke(entry);
+                            } catch (Exception e) {
+                                // entry is the value itself (no getKey)
+                                key = null;
+                                val = entry;
+                            }
+                            if (key != null) newMap.put(key, val);
+                        }
+                    }
+                    gpPropertiesField.set(toGp, newMap);
+                    Bukkit.getLogger().info("[Mineflayer] Skin: field replaced with LinkedHashMap for " + name);
+                    return;
+                } catch (Exception e2) {
+                    Bukkit.getLogger().warning("[Mineflayer] Skin: field replacement failed: " + e2.getMessage());
                     return;
                 }
-                Object entriesObj = fromProps.getClass().getMethod("entrySet").invoke(fromProps);
-                Object[] entries = (Object[]) entriesObj.getClass().getMethod("toArray").invoke(entriesObj);
-                Class<?> ppCls = Class.forName("com.destroystokyo.paper.profile.ProfileProperty");
-                Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
-                Constructor<?> propCtor = propCls.getConstructor(String.class, String.class, String.class);
-                Method ppGetName = ppCls.getMethod("getName");
-                Method ppGetValue = ppCls.getMethod("getValue");
-                Method ppGetSignature = ppCls.getMethod("getSignature");
-                for (Object entry : entries) {
-                    String key = (String) entry.getClass().getMethod("getKey").invoke(entry);
+            }
+            // Copy entries
+            Class<?> ppCls = Class.forName("com.destroystokyo.paper.profile.ProfileProperty");
+            Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
+            Constructor<?> propCtor = propCls.getConstructor(String.class, String.class, String.class);
+            Method ppGetName = ppCls.getMethod("getName");
+            Method ppGetValue = ppCls.getMethod("getValue");
+            Method ppGetSignature = ppCls.getMethod("getSignature");
+            int cnt = 0;
+            boolean isMapEntry = entries.length > 0 && !ppCls.isInstance(entries[0]);
+            for (Object entry : entries) {
+                String pName, pValue, pSig;
+                if (isMapEntry) {
+                    // Map.Entry<String, Property>
+                    pName = (String) entry.getClass().getMethod("getKey").invoke(entry);
                     Object val = entry.getClass().getMethod("getValue").invoke(entry);
-                    String pName = (String) ppGetName.invoke(val);
-                    String pValue = (String) ppGetValue.invoke(val);
-                    String pSig = (String) ppGetSignature.invoke(val);
-                    Object property = propCtor.newInstance(pName, pValue, pSig);
-                    putMethod.invoke(toProps, key, property);
-                    cnt++;
+                    if (ppCls.isInstance(val)) {
+                        pName = (String) ppGetName.invoke(val);
+                        pValue = (String) ppGetValue.invoke(val);
+                        pSig = (String) ppGetSignature.invoke(val);
+                    } else if (propCls.isInstance(val)) {
+                        // Already a real Property, just copy it directly
+                        if (writeMethod.getParameterCount() == 2) {
+                            writeMethod.invoke(toProps, pName, val);
+                        } else {
+                            writeMethod.invoke(toProps, val);
+                        }
+                        cnt++;
+                        continue;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    pName = (String) ppGetName.invoke(entry);
+                    pValue = (String) ppGetValue.invoke(entry);
+                    pSig = (String) ppGetSignature.invoke(entry);
                 }
+                Object property = propCtor.newInstance(pName, pValue, pSig);
+                if (writeMethod.getParameterCount() == 2) {
+                    writeMethod.invoke(toProps, pName, property);
+                } else {
+                    writeMethod.invoke(toProps, property);
+                }
+                cnt++;
             }
             if (cnt > 0) {
                 Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
