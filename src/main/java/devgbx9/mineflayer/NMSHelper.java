@@ -217,41 +217,71 @@ public class NMSHelper {
                 try {
                     Object pp = source.getClass().getMethod("getPlayerProfile").invoke(source);
                     Object srcProps = pp.getClass().getMethod("getProperties").invoke(pp);
-                    if (srcProps != null) logMethods(srcProps, "source props");
-                } catch (Exception ign) {}
+                    if (srcProps != null) {
+                        logMethods(srcProps, "source props");
+                        // Log size
+                        try {
+                            int sz = (int) srcProps.getClass().getMethod("size").invoke(srcProps);
+                            Bukkit.getLogger().info("[Mineflayer] Skin: source PropertySet size=" + sz);
+                        } catch (Exception e2) {
+                            Bukkit.getLogger().warning("[Mineflayer] Skin: cannot get PropertySet size: " + e2.getMessage());
+                        }
+                    }
+                } catch (Exception ign) {
+                    Bukkit.getLogger().warning("[Mineflayer] Skin: debug path: " + ign.getClass().getSimpleName() + ": " + ign.getMessage());
+                }
             }
             logMethods(gpProps, "bot gpProps");
 
-            // Get properties from source's PlayerProfile directly (avoids Paper API blocks and MutablePropertyMap)
+            // Path 1: Get properties from source's PlayerProfile as Property[] via toArray()
             if (source != null) {
                 try {
                     Object pp = source.getClass().getMethod("getPlayerProfile").invoke(source);
                     Object propsRaw = pp.getClass().getMethod("getProperties").invoke(pp);
                     Object[] propsArr = readPropsArray(propsRaw);
                     if (propsArr != null && propsArr.length > 0) {
+                        Bukkit.getLogger().info("[Mineflayer] Skin: PlayerProfile has " + propsArr.length + " properties");
                         int cnt = putPropsFromArray(propsArr, gpProps, name);
                         if (cnt > 0) {
                             Bukkit.getLogger().info("[Mineflayer] Skin: applied " + cnt + " properties for " + name);
                             return gp;
                         }
+                    } else {
+                        Bukkit.getLogger().info("[Mineflayer] Skin: PlayerProfile properties empty (size=" + (propsArr == null ? "null" : propsArr.length) + ")");
                     }
                 } catch (Exception e) {
                     Bukkit.getLogger().warning("[Mineflayer] Skin: PlayerProfile path: " + e.getClass().getSimpleName() + ": " + e.getMessage());
                 }
             }
 
-            // Last resort: copy via GameProfile field (handles both Map and non-Map PropertyMap)
+            // Path 2: extract real GameProfile from source and copy its PropertyMap
             if (source != null) {
                 try {
                     Object pp = source.getClass().getMethod("getPlayerProfile").invoke(source);
                     Object realGp = extractRealGp(pp);
-                    if (realGp != null) { copyProperties(realGp, gp, name); return gp; }
-                } catch (Exception ignored) {}
+                    if (realGp != null) {
+                        Bukkit.getLogger().info("[Mineflayer] Skin: extracted GameProfile from PlayerProfile");
+                        copyProperties(realGp, gp, name);
+                        return gp;
+                    } else {
+                        Bukkit.getLogger().info("[Mineflayer] Skin: no GameProfile field in PlayerProfile");
+                    }
+                } catch (Exception e) {
+                    Bukkit.getLogger().warning("[Mineflayer] Skin: PlayerProfile extract: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                }
                 try {
                     Object craftPlayer = source.getClass().getMethod("getHandle").invoke(source);
                     Object realGp = extractRealGp(craftPlayer);
-                    if (realGp != null) { copyProperties(realGp, gp, name); return gp; }
-                } catch (Exception ignored) {}
+                    if (realGp != null) {
+                        Bukkit.getLogger().info("[Mineflayer] Skin: extracted GameProfile from ServerPlayer");
+                        copyProperties(realGp, gp, name);
+                        return gp;
+                    } else {
+                        Bukkit.getLogger().info("[Mineflayer] Skin: no GameProfile field in ServerPlayer");
+                    }
+                } catch (Exception e) {
+                    Bukkit.getLogger().warning("[Mineflayer] Skin: ServerPlayer extract: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                }
             }
 
             return gp;
@@ -338,20 +368,31 @@ public class NMSHelper {
             Method ppGetName = ppCls.getMethod("getName");
             Method ppGetValue = ppCls.getMethod("getValue");
             Method ppGetSignature = ppCls.getMethod("getSignature");
+            Method mName = propCls.getMethod("getName");
+            Method mValue = propCls.getMethod("getValue");
+            Method mSignature = propCls.getMethod("getSignature");
             int cnt = 0;
-            boolean isMapEntry = entries.length > 0 && !ppCls.isInstance(entries[0]);
             for (Object entry : entries) {
                 String pName, pValue, pSig;
-                if (isMapEntry) {
-                    // Map.Entry<String, Property>
+                if (ppCls.isInstance(entry)) {
+                    pName = (String) ppGetName.invoke(entry);
+                    pValue = (String) ppGetValue.invoke(entry);
+                    pSig = (String) ppGetSignature.invoke(entry);
+                } else if (propCls.isInstance(entry)) {
+                    // Already a real Property, copy directly without conversion
+                    pName = (String) mName.invoke(entry);
+                    if (writeMethod.getParameterCount() == 2) {
+                        writeMethod.invoke(toProps, pName, entry);
+                    } else {
+                        writeMethod.invoke(toProps, entry);
+                    }
+                    cnt++;
+                    continue;
+                } else {
+                    // Assume Map.Entry<String, Property>
                     pName = (String) entry.getClass().getMethod("getKey").invoke(entry);
                     Object val = entry.getClass().getMethod("getValue").invoke(entry);
-                    if (ppCls.isInstance(val)) {
-                        pName = (String) ppGetName.invoke(val);
-                        pValue = (String) ppGetValue.invoke(val);
-                        pSig = (String) ppGetSignature.invoke(val);
-                    } else if (propCls.isInstance(val)) {
-                        // Already a real Property, just copy it directly
+                    if (propCls.isInstance(val)) {
                         if (writeMethod.getParameterCount() == 2) {
                             writeMethod.invoke(toProps, pName, val);
                         } else {
@@ -359,13 +400,13 @@ public class NMSHelper {
                         }
                         cnt++;
                         continue;
+                    } else if (ppCls.isInstance(val)) {
+                        pName = (String) ppGetName.invoke(val);
+                        pValue = (String) ppGetValue.invoke(val);
+                        pSig = (String) ppGetSignature.invoke(val);
                     } else {
                         continue;
                     }
-                } else {
-                    pName = (String) ppGetName.invoke(entry);
-                    pValue = (String) ppGetValue.invoke(entry);
-                    pSig = (String) ppGetSignature.invoke(entry);
                 }
                 Object property = propCtor.newInstance(pName, pValue, pSig);
                 if (writeMethod.getParameterCount() == 2) {
