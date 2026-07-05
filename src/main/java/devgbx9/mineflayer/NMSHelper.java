@@ -224,63 +224,48 @@ public class NMSHelper {
 
     private static boolean applySkinFromMineSkin(Object gpProps, String skinName, String logName) {
         if (MINESKIN_KEY == null || MINESKIN_KEY.isEmpty()) return false;
-        String[] names = new String[]{skinName, null};
-        if (!skinName.equals(logName)) {
-            names = new String[]{skinName, logName, null};
-        } else {
-            names = new String[]{skinName, null};
-        }
-        for (String tryName : names) {
-            try {
-                HttpClient client = HttpClient.newHttpClient();
-                HttpRequest request;
-                if (tryName != null) {
-                    String json = "{\"name\":\"" + tryName + "\",\"visibility\":0}";
-                    request = HttpRequest.newBuilder()
-                        .uri(URI.create("https://api.mineskin.org/v2/generate/user"))
-                        .header("Content-Type", "application/json")
-                        .header("Authorization", "Bearer " + MINESKIN_KEY)
-                        .POST(HttpRequest.BodyPublishers.ofString(json))
-                        .build();
-                } else {
-                    String skinUrl = "https://textures.minecraft.net/texture/1a4af718b55e85db84ca59814b9d3cd757aef7d6c1f8b46a4f9a1e7c73e0e4a";
-                    String json = "{\"url\":\"" + skinUrl + "\",\"visibility\":0}";
-                    request = HttpRequest.newBuilder()
-                        .uri(URI.create("https://api.mineskin.org/v2/generate/url"))
-                        .header("Content-Type", "application/json")
-                        .header("Authorization", "Bearer " + MINESKIN_KEY)
-                        .POST(HttpRequest.BodyPublishers.ofString(json))
-                        .build();
-                }
-                HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
-                if (resp.statusCode() != 200) {
-                    Bukkit.getLogger().info("[Mineflayer] Skin: MineSkin HTTP " + resp.statusCode() + " for " + (tryName != null ? tryName : "random"));
-                    continue;
-                }
-                String body = resp.body();
-                String value = extractJsonStr(body, "value");
-                String signature = extractJsonStr(body, "signature");
-                if (value == null || signature == null) {
-                    Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin response missing textures");
-                    continue;
-                }
-                Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
-                Constructor<?> ctor = propCls.getConstructor(String.class, String.class, String.class);
-                Object prop = ctor.newInstance("textures", value, signature);
-                Method write = findWriteMethod(gpProps);
-                if (write == null) return false;
-                if (write.getParameterCount() == 2) {
-                    write.invoke(gpProps, "textures", prop);
-                } else {
-                    write.invoke(gpProps, prop);
-                }
-                Bukkit.getLogger().info("[Mineflayer] Skin: applied from MineSkin for " + logName);
-                return true;
-            } catch (Exception e) {
-                Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin error: " + e.getMessage());
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            // MineSkin V2 uses unified /v2/generate; provide 'url' for URL-based generation
+            String skinUrl = "https://textures.minecraft.net/texture/1a4af718b55e85db84ca59814b9d3cd757aef7d6c1f8b46a4f9a1e7c73e0e4a";
+            String json = "{\"url\":\"" + skinUrl + "\",\"visibility\":0,\"variant\":\"classic\"}";
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.mineskin.org/v2/generate"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + MINESKIN_KEY)
+                .header("User-Agent", "Mineflayer/v1.0")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                Bukkit.getLogger().info("[Mineflayer] Skin: MineSkin HTTP " + resp.statusCode() + " for URL fallback");
+                // Log response body for debugging
+                Bukkit.getLogger().info("[Mineflayer] Skin: MineSkin response: " + resp.body());
+                return false;
             }
+            String body = resp.body();
+            String value = extractJsonStr(body, "value");
+            String signature = extractJsonStr(body, "signature");
+            if (value == null || signature == null) {
+                Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin response missing textures");
+                return false;
+            }
+            Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
+            Constructor<?> ctor = propCls.getConstructor(String.class, String.class, String.class);
+            Object prop = ctor.newInstance("textures", value, signature);
+            Method write = findWriteMethod(gpProps);
+            if (write == null) return false;
+            if (write.getParameterCount() == 2) {
+                write.invoke(gpProps, "textures", prop);
+            } else {
+                write.invoke(gpProps, prop);
+            }
+            Bukkit.getLogger().info("[Mineflayer] Skin: applied from MineSkin for " + logName);
+            return true;
+        } catch (Exception e) {
+            Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin error: " + e.getMessage());
+            return false;
         }
-        return false;
     }
 
     private static String extractJsonStr(String json, String key) {
