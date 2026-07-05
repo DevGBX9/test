@@ -48,14 +48,14 @@ public class NMSHelper {
 
     private static Class<?> serverPlayerCls;
 
-    // Physics simulation
+    // Physics simulation (optional)
+    private static boolean physicsAvailable = false;
     private static Object moverTypePlayer;
     private static Class<?> vec3Class;
     private static Constructor<?> vec3Constructor;
     private static Method getDeltaMovementMethod;
     private static Method setDeltaMovementMethod;
     private static Method moveMethod;
-    private static Method knockbackMethod;
     private static Field hasImpulseField;
     private static Field onGroundField;
 
@@ -133,19 +133,22 @@ public class NMSHelper {
             gamePacketListenerConstructor = findConstructor(listenerCls, 4);
             serverPlayerConnectionField = findFieldByType(serverPlayerCls, "ServerGamePacketListenerImpl");
 
-            // Physics simulation
-            Class<?> entityCls2 = Class.forName("net.minecraft.world.entity.Entity");
-            getDeltaMovementMethod = entityCls2.getMethod("getDeltaMovement");
-            setDeltaMovementMethod = entityCls2.getMethod("setDeltaMovement", Class.forName("net.minecraft.world.phys.Vec3"));
-            Class<?> moverTypeCls = Class.forName("net.minecraft.world.entity.MoverType");
-            moverTypePlayer = moverTypeCls.getField("PLAYER").get(null);
-            moveMethod = entityCls2.getMethod("move", moverTypeCls, Class.forName("net.minecraft.world.phys.Vec3"));
-            Class<?> livingEntityCls = Class.forName("net.minecraft.world.entity.LivingEntity");
-            knockbackMethod = livingEntityCls.getMethod("knockback", double.class, double.class, double.class);
-            hasImpulseField = entityCls2.getField("hasImpulse");
-            onGroundField = entityCls2.getField("onGround");
-            vec3Class = Class.forName("net.minecraft.world.phys.Vec3");
-            vec3Constructor = vec3Class.getConstructor(double.class, double.class, double.class);
+            // Physics simulation (optional - don't fail main init)
+            try {
+                Class<?> entityCls2 = Class.forName("net.minecraft.world.entity.Entity");
+                getDeltaMovementMethod = entityCls2.getMethod("getDeltaMovement");
+                setDeltaMovementMethod = entityCls2.getMethod("setDeltaMovement", Class.forName("net.minecraft.world.phys.Vec3"));
+                Class<?> moverTypeCls = Class.forName("net.minecraft.world.entity.MoverType");
+                moverTypePlayer = moverTypeCls.getField("PLAYER").get(null);
+                moveMethod = entityCls2.getMethod("move", moverTypeCls, Class.forName("net.minecraft.world.phys.Vec3"));
+                hasImpulseField = entityCls2.getField("hasImpulse");
+                onGroundField = entityCls2.getField("onGround");
+                vec3Class = Class.forName("net.minecraft.world.phys.Vec3");
+                vec3Constructor = vec3Class.getConstructor(double.class, double.class, double.class);
+                physicsAvailable = true;
+            } catch (Exception e) {
+                Bukkit.getLogger().warning("[Mineflayer] Physics unavailable (no knockback/gravity): " + e.getMessage());
+            }
 
             initialized = true;
             Bukkit.getLogger().info("[Mineflayer] NMS ready");
@@ -281,11 +284,34 @@ public class NMSHelper {
 
     // --- Physics ---
 
+    public static boolean isPhysicsAvailable() {
+        return physicsAvailable;
+    }
+
     public static void applyKnockback(Object serverPlayer, double strength, double dx, double dz) throws Exception {
-        knockbackMethod.invoke(serverPlayer, strength, dx, dz);
+        if (!physicsAvailable) return;
+        // Manual knockback - mimics LivingEntity.knockback()
+        Object delta = getDeltaMovementMethod.invoke(serverPlayer);
+        double vx = vec3Class.getField("x").getDouble(delta);
+        double vy = vec3Class.getField("y").getDouble(delta);
+        double vz = vec3Class.getField("z").getDouble(delta);
+
+        double len = Math.sqrt(dx * dx + dz * dz);
+        if (len < 1.0E-4) return;
+        double nx = dx / len;
+        double nz = dz / len;
+
+        double newVx = vx / 2.0 - nx * strength;
+        double newVy = onGroundField.getBoolean(serverPlayer) ? Math.min(0.4, vy / 2.0 + strength) : vy;
+        double newVz = vz / 2.0 - nz * strength;
+
+        Object newDelta = vec3Constructor.newInstance(newVx, newVy, newVz);
+        setDeltaMovementMethod.invoke(serverPlayer, newDelta);
+        hasImpulseField.setBoolean(serverPlayer, true);
     }
 
     public static void simulateMovement(Object serverPlayer) throws Exception {
+        if (!physicsAvailable) return;
         Object delta = getDeltaMovementMethod.invoke(serverPlayer);
         double vx = vec3Class.getField("x").getDouble(delta);
         double vy = vec3Class.getField("y").getDouble(delta);
