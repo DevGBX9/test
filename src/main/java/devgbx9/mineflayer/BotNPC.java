@@ -2,7 +2,7 @@ package devgbx9.mineflayer;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.block.Block;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
@@ -101,24 +101,38 @@ public class BotNPC {
         vz *= 0.98;
 
         Location loc = bukkitPlayer.getLocation().clone();
-        double newX = loc.getX() + vx;
-        double newY = loc.getY() + vy;
-        double newZ = loc.getZ() + vz;
+        double oldX = loc.getX(), oldY = loc.getY(), oldZ = loc.getZ();
+        World world = loc.getWorld();
+        double newX = oldX + vx;
+        double newY = oldY + vy;
+        double newZ = oldZ + vz;
 
-        int bx = (int) Math.floor(newX);
-        int bz = (int) Math.floor(newZ);
+        // X axis
+        if (Math.abs(vx) > 0.001 && collides(world, newX, oldY, oldZ)) {
+            newX = oldX;
+            vx = 0;
+        }
+        // Y axis
         boolean onGround = false;
-        if (vy <= 0) {
-            int by = (int) Math.floor(newY);
-            Block block = loc.getWorld().getBlockAt(bx, by, bz);
-            if (block.getType().isSolid()) {
-                newY = by + 1.0;
-                onGround = true;
+        if (Math.abs(vy) > 0.001) {
+            if (collides(world, newX, newY, oldZ)) {
+                if (vy <= 0) {
+                    newY = Math.floor(newY) + 1.0;
+                    onGround = true;
+                } else {
+                    newY = oldY;
+                }
+                vy = 0;
             }
         }
+        // Z axis
+        if (Math.abs(vz) > 0.001 && collides(world, newX, newY, newZ)) {
+            newZ = oldZ;
+            vz = 0;
+        }
 
-        if (newY < loc.getWorld().getMinHeight()) {
-            newY = loc.getWorld().getHighestBlockYAt(bx, bz) + 1.0;
+        if (newY < world.getMinHeight()) {
+            newY = world.getHighestBlockYAt((int) Math.floor(newX), (int) Math.floor(newZ)) + 1.0;
             onGround = true;
         }
 
@@ -136,6 +150,23 @@ public class BotNPC {
         }
 
         bukkitPlayer.setVelocity(new Vector(vx, vy, vz));
+    }
+
+    private boolean collides(World world, double x, double y, double z) {
+        int minBX = (int) Math.floor(x - 0.3);
+        int maxBX = (int) Math.floor(x + 0.3);
+        int minBY = (int) Math.floor(y);
+        int maxBY = (int) Math.floor(y + 1.8);
+        int minBZ = (int) Math.floor(z - 0.3);
+        int maxBZ = (int) Math.floor(z + 0.3);
+        for (int bx = minBX; bx <= maxBX; bx++) {
+            for (int by = minBY; by <= maxBY; by++) {
+                for (int bz = minBZ; bz <= maxBZ; bz++) {
+                    if (world.getBlockAt(bx, by, bz).getType().isSolid()) return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void faceTarget() {
