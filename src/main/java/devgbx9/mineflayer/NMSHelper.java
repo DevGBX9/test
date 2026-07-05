@@ -8,6 +8,10 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -212,6 +216,62 @@ public class NMSHelper {
         return cnt;
     }
 
+    private static String MINESKIN_KEY;
+
+    public static void setMineSkinKey(String key) {
+        MINESKIN_KEY = key;
+    }
+
+    private static boolean applySkinFromMineSkin(Object gpProps, String skinName, String logName) {
+        if (MINESKIN_KEY == null || MINESKIN_KEY.isEmpty()) return false;
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            String json = "{\"name\":\"" + skinName + "\",\"visibility\":0}";
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.mineskin.org/v2/generate/user"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + MINESKIN_KEY)
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin HTTP " + resp.statusCode() + " for " + skinName);
+                return false;
+            }
+            String body = resp.body();
+            String value = extractJsonStr(body, "value");
+            String signature = extractJsonStr(body, "signature");
+            if (value == null || signature == null) {
+                Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin response missing textures");
+                return false;
+            }
+            Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
+            Constructor<?> ctor = propCls.getConstructor(String.class, String.class, String.class);
+            Object prop = ctor.newInstance("textures", value, signature);
+            Method write = findWriteMethod(gpProps);
+            if (write == null) return false;
+            if (write.getParameterCount() == 2) {
+                write.invoke(gpProps, "textures", prop);
+            } else {
+                write.invoke(gpProps, prop);
+            }
+            Bukkit.getLogger().info("[Mineflayer] Skin: applied from MineSkin for " + logName);
+            return true;
+        } catch (Exception e) {
+            Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin error: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static String extractJsonStr(String json, String key) {
+        String search = "\"" + key + "\":\"";
+        int start = json.indexOf(search);
+        if (start < 0) return null;
+        start += search.length();
+        int end = json.indexOf("\"", start);
+        return end < 0 ? null : json.substring(start, end);
+    }
+
     public static Object createGameProfileWithSkin(UUID uuid, String name, Player source) {
         try {
             Object gp = gameProfileConstructor.newInstance(uuid, name);
@@ -290,6 +350,10 @@ public class NMSHelper {
                     Bukkit.getLogger().warning("[Mineflayer] Skin: ServerPlayer extract: " + e.getClass().getSimpleName() + ": " + e.getMessage());
                 }
             }
+
+            // Path 3: try MineSkin API (offline-mode fallback)
+            String skinName = (source != null) ? source.getName() : name;
+            if (applySkinFromMineSkin(gpProps, skinName, name)) return gp;
 
             return gp;
         } catch (Exception e) {
