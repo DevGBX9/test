@@ -44,8 +44,9 @@ public class BotNPC {
                 serverPlayer = NMSHelper.createAndJoinFakePlayer(name, uuid, location);
                 bukkitPlayer = NMSHelper.toBukkitPlayer(serverPlayer);
                 bukkitPlayer.setInvulnerable(true);
+                bukkitPlayer.teleport(location);
                 NMSHelper.broadcastJoinMessage(name);
-                Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' spawned");
+                Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' spawned at " + location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ());
                 alive = true;
                 return;
             } catch (Exception e) {

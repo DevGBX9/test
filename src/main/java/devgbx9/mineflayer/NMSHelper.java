@@ -23,7 +23,6 @@ public class NMSHelper {
     private static Method minecraftServerGetPlayerList;
 
     private static Constructor<?> serverPlayerConstructor;
-    private static Method serverPlayerSetPos;
     private static Field serverPlayerConnectionField;
     private static Method serverLevelAddPlayer;
 
@@ -68,9 +67,8 @@ public class NMSHelper {
             Class<?> nmsServerCls = Class.forName("net.minecraft.server.MinecraftServer");
             minecraftServerGetPlayerList = nmsServerCls.getMethod("getPlayerList");
 
-            Class<?> serverPlayerCls = Class.forName("net.minecraft.server.level.ServerPlayer");
+            Class<?>             serverPlayerCls = Class.forName("net.minecraft.server.level.ServerPlayer");
             serverPlayerConstructor = findConstructor(serverPlayerCls, 4);
-            serverPlayerSetPos = findMethod(serverPlayerCls, "setPos", 3);
 
             Class<?> serverLevelCls2 = Class.forName("net.minecraft.server.level.ServerLevel");
             String[] addNames = {"addNewPlayer", "addPlayer", "addEntity", "addFreshEntity"};
@@ -163,7 +161,9 @@ public class NMSHelper {
                         if (realProps instanceof Map && botProps instanceof Map) {
                             int cnt = ((Map) realProps).size();
                             ((Map) botProps).putAll((Map) realProps);
-                            if (cnt > 0) Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
+                            Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
+                        } else {
+                            Bukkit.getLogger().warning("[Mineflayer] Skin: type mismatch real=" + (realProps != null ? realProps.getClass().getName() : "null") + " bot=" + (botProps != null ? botProps.getClass().getName() : "null"));
                         }
                     }
                 }
@@ -199,7 +199,10 @@ public class NMSHelper {
                 try {
                     Method cfg = connectionCls.getMethod("configureSerializationAfterHandshake", listener.getClass());
                     cfg.invoke(conn, listener);
-                } catch (Exception ignored) {}
+                    Bukkit.getLogger().info("[Mineflayer] Packet pipeline configured for " + name);
+                } catch (Exception ex) {
+                    Bukkit.getLogger().warning("[Mineflayer] configureSerialization failed for " + name + ": " + ex.getMessage());
+                }
             } catch (Exception e) {
                 Bukkit.getLogger().warning("[Mineflayer] set listener failed: " + e.getMessage());
             }
@@ -211,9 +214,6 @@ public class NMSHelper {
             try {
                 playerListPlaceNewPlayer.invoke(playerList, conn, serverPlayer, cookie);
                 Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' placeNewPlayer OK");
-                if (serverPlayerSetPos != null) {
-                    serverPlayerSetPos.invoke(serverPlayer, location.getX(), location.getY(), location.getZ());
-                }
                 return serverPlayer;
             } catch (Exception e) {
                 Bukkit.getLogger().warning("[Mineflayer] placeNewPlayer failed: " + e.getMessage());
@@ -246,11 +246,6 @@ public class NMSHelper {
             }
         } else {
             Bukkit.getLogger().warning("[Mineflayer] No method found to add player to world");
-        }
-
-        // Set position AFTER everything so the bot appears at the right place
-        if (serverPlayerSetPos != null) {
-            serverPlayerSetPos.invoke(serverPlayer, location.getX(), location.getY(), location.getZ());
         }
 
         Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' registered manually at " + location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ());
