@@ -226,9 +226,10 @@ public class NMSHelper {
         if (MINESKIN_KEY == null || MINESKIN_KEY.isEmpty()) return false;
         try {
             HttpClient client = HttpClient.newHttpClient();
-            // MineSkin V2: use known real UUID so MineSkin fetches skin from Mojang
-            String knownUuid = "069a79f4-44e9-4726-a5be-fca90e38aaf5"; // Notch
-            String json = "{\"user\":\"" + knownUuid + "\",\"visibility\":\"public\",\"variant\":\"classic\"}";
+            // Try to fetch real UUID from Mojang API, fallback to Notch UUID
+            String uuid = fetchUuidFromMojang(skinName);
+            if (uuid == null) uuid = "069a79f4-44e9-4726-a5be-fca90e38aaf5"; // Notch
+            String json = "{\"user\":\"" + uuid + "\",\"visibility\":\"public\",\"variant\":\"classic\"}";
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://api.mineskin.org/v2/generate"))
                 .header("Content-Type", "application/json")
@@ -275,6 +276,27 @@ public class NMSHelper {
         start += search.length();
         int end = json.indexOf("\"", start);
         return end < 0 ? null : json.substring(start, end);
+    }
+
+    private static String fetchUuidFromMojang(String username) {
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.mojang.com/users/profiles/minecraft/" + username))
+                .header("User-Agent", "Mineflayer/v1.0")
+                .GET()
+                .build();
+            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return null;
+            String id = extractJsonStr(resp.body(), "id");
+            if (id == null || id.length() != 32) return null;
+            return id.substring(0, 8) + "-" + id.substring(8, 12) + "-"
+                 + id.substring(12, 16) + "-" + id.substring(16, 20) + "-"
+                 + id.substring(20);
+        } catch (Exception e) {
+            Bukkit.getLogger().warning("[Mineflayer] Skin: Mojang UUID error: " + e.getMessage());
+            return null;
+        }
     }
 
     public static Object createGameProfileWithSkin(UUID uuid, String name, Player source) {
