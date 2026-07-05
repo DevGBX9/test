@@ -4,15 +4,17 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabExecutor;
+import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-public class MineflayerPlugin extends JavaPlugin implements TabExecutor {
+public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, TabCompleter {
 
     private BotManager botManager;
     private final Random random = new Random();
@@ -87,23 +89,26 @@ public class MineflayerPlugin extends JavaPlugin implements TabExecutor {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return List.of("add", "delete");
+            List<String> result = new ArrayList<>();
+            result.add("add");
+            result.add("delete");
+            return result;
         }
         if (args.length == 2) {
             String prefix = args[1].toLowerCase();
+            List<String> result = new ArrayList<>();
             if (args[0].equalsIgnoreCase("delete")) {
-                return botManager.getBotNames().stream()
-                    .filter(n -> n.toLowerCase().startsWith(prefix))
-                    .toList();
+                for (String n : botManager.getBotNames()) {
+                    if (n.toLowerCase().startsWith(prefix)) result.add(n);
+                }
+            } else if (args[0].equalsIgnoreCase("add")) {
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    if (p.getName().toLowerCase().startsWith(prefix)) result.add(p.getName());
+                }
             }
-            if (args[0].equalsIgnoreCase("add")) {
-                return Bukkit.getOnlinePlayers().stream()
-                    .map(Player::getName)
-                    .filter(n -> n.toLowerCase().startsWith(prefix))
-                    .toList();
-            }
+            return result;
         }
-        return List.of();
+        return new ArrayList<>();
     }
 
     private Location randomLocation(World world) {

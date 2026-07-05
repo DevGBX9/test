@@ -1,5 +1,6 @@
 package devgbx9.mineflayer;
 
+import io.papermc.paper.event.player.PlayerKickEvent;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -25,6 +26,15 @@ public class BotListener implements Listener {
     public void onPlayerDeath(PlayerDeathEvent event) {
         String name = event.getPlayer().getName();
         if (botManager.exists(name)) {
+            botManager.removeBot(name);
+        }
+    }
+
+    @EventHandler
+    public void onPlayerKick(PlayerKickEvent event) {
+        String name = event.getPlayer().getName();
+        if (botManager.exists(name)) {
+            event.setCancelled(true);
             botManager.removeBot(name);
         }
     }

@@ -30,7 +30,7 @@ public class NMSHelper {
     private static Method clientInformationCreateDefault;
     private static Constructor<?> gameProfileConstructor;
     private static Class<?> gpClass;
-    private static Method gpGetProperties;
+    private static Field gpPropertiesField;
 
     private static Object packetFlowServerbound;
     private static Constructor<?> connectionConstructor;
@@ -48,7 +48,7 @@ public class NMSHelper {
     private static Constructor<?> gamePacketListenerConstructor;
     private static Method cookieCreateInitial;
 
-    private static Method resolvableProfileFromGp;
+    private static Class<?> serverPlayerCls;
 
     public static boolean isAvailable() {
         return initialized;
@@ -73,11 +73,24 @@ public class NMSHelper {
             serverPlayerSetPos = findMethod(serverPlayerCls, "setPos", 3);
 
             Class<?> serverLevelCls2 = Class.forName("net.minecraft.server.level.ServerLevel");
-            for (Method m : serverLevelCls2.getDeclaredMethods()) {
-                if (m.getParameterCount() == 1 && m.getName().contains("Player")) {
+            String[] addNames = {"addNewPlayer", "addPlayer", "addEntity", "addFreshEntity"};
+            for (String name : addNames) {
+                try {
+                    Method m = serverLevelCls2.getDeclaredMethod(name, serverPlayerCls);
+                    m.setAccessible(true);
                     serverLevelAddPlayer = m;
-                    serverLevelAddPlayer.setAccessible(true);
                     break;
+                } catch (NoSuchMethodException ignored) {}
+            }
+            if (serverLevelAddPlayer == null) {
+                Class<?> entityCls = Class.forName("net.minecraft.world.entity.Entity");
+                for (String name : addNames) {
+                    try {
+                        Method m = serverLevelCls2.getDeclaredMethod(name, entityCls);
+                        m.setAccessible(true);
+                        serverLevelAddPlayer = m;
+                        break;
+                    } catch (NoSuchMethodException ignored) {}
                 }
             }
 
@@ -86,11 +99,14 @@ public class NMSHelper {
 
             gpClass = Class.forName("com.mojang.authlib.GameProfile");
             gameProfileConstructor = gpClass.getConstructor(UUID.class, String.class);
-            for (String mn : new String[]{"getProperties", "properties", "getProfileProperties"}) {
-                try { gpGetProperties = gpClass.getMethod(mn); break; } catch (NoSuchMethodException ignored) {}
+            for (Class<?> c = gpClass; c != null && gpPropertiesField == null; c = c.getSuperclass()) {
+                try {
+                    gpPropertiesField = c.getDeclaredField("properties");
+                    gpPropertiesField.setAccessible(true);
+                } catch (NoSuchFieldException ignored) {}
             }
-            if (gpGetProperties == null) {
-                Bukkit.getLogger().warning("[Mineflayer] Cannot find GameProfile properties method, skin copy disabled");
+            if (gpPropertiesField == null) {
+                Bukkit.getLogger().warning("[Mineflayer] Cannot find GameProfile.properties field, skin copy disabled");
             }
 
             Class<?> packetFlowCls = resolveClass("net.minecraft.network.PacketFlow", "net.minecraft.network.protocol.PacketFlow");
@@ -118,11 +134,6 @@ public class NMSHelper {
             gamePacketListenerConstructor = findConstructor(listenerCls, 4);
             serverPlayerConnectionField = findFieldByType(serverPlayerCls, "ServerGamePacketListenerImpl");
 
-            try {
-                Class<?> rpCls = Class.forName("io.papermc.paper.datacomponent.item.ResolvableProfile");
-                resolvableProfileFromGp = findStaticMethod(rpCls, "resolvableProfile", gpClass);
-            } catch (Exception ignored) {}
-
             initialized = true;
             Bukkit.getLogger().info("[Mineflayer] NMS ready");
         } catch (Exception e) {
@@ -133,7 +144,7 @@ public class NMSHelper {
     public static Object createGameProfileWithSkin(UUID uuid, String name) {
         try {
             Object gp = gameProfileConstructor.newInstance(uuid, name);
-            if (gpGetProperties != null) {
+            if (gpPropertiesField != null) {
                 Player online = Bukkit.getPlayerExact(name);
                 if (online != null) {
                     Object craftPlayer = online.getClass().getMethod("getHandle").invoke(online);
@@ -147,9 +158,11 @@ public class NMSHelper {
                         } catch (NoSuchFieldException ignored) {}
                     }
                     if (realGp != null) {
-                        Object realProps = gpGetProperties.invoke(realGp);
-                        Object botProps = gpGetProperties.invoke(gp);
-                        Map.class.getMethod("putAll", Map.class).invoke(botProps, realProps);
+                        Object realProps = gpPropertiesField.get(realGp);
+                        Object botProps = gpPropertiesField.get(gp);
+                        if (realProps instanceof Map && botProps instanceof Map) {
+                            ((Map) botProps).putAll((Map) realProps);
+                        }
                     }
                 }
             }
@@ -218,13 +231,15 @@ public class NMSHelper {
             byUUID.put(uuid, serverPlayer);
         }
 
-        // Add to world so the ServerPlayer entity is visible
         if (serverLevelAddPlayer != null) {
             try {
                 serverLevelAddPlayer.invoke(serverLevel, serverPlayer);
+                Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' added to world via " + serverLevelAddPlayer.getName());
             } catch (Exception e) {
-                Bukkit.getLogger().warning("[Mineflayer] add to world failed: " + e.getMessage());
+                Bukkit.getLogger().warning("[Mineflayer] add to world failed (" + serverLevelAddPlayer.getName() + "): " + e.getMessage());
             }
+        } else {
+            Bukkit.getLogger().warning("[Mineflayer] No method found to add player to world");
         }
 
         Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' registered manually");
