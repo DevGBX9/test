@@ -97,6 +97,11 @@ public class NMSHelper {
 
             gpClass = Class.forName("com.mojang.authlib.GameProfile");
             gameProfileConstructor = gpClass.getConstructor(UUID.class, String.class);
+            StringBuilder dbg = new StringBuilder("[Mineflayer] GameProfile fields: ");
+            for (Field f : gpClass.getDeclaredFields()) {
+                dbg.append(f.getName()).append("(").append(f.getType().getSimpleName()).append(") ");
+            }
+            Bukkit.getLogger().info(dbg.toString());
             for (Class<?> c = gpClass; c != null && gpPropertiesField == null; c = c.getSuperclass()) {
                 try {
                     gpPropertiesField = c.getDeclaredField("properties");
@@ -142,11 +147,30 @@ public class NMSHelper {
     public static Object createGameProfileWithSkin(UUID uuid, String name) {
         try {
             Object gp = gameProfileConstructor.newInstance(uuid, name);
-            if (gpPropertiesField != null) {
-                Player online = Bukkit.getPlayerExact(name);
-                if (online != null) {
+            Player online = Bukkit.getPlayerExact(name);
+            if (online == null || gpPropertiesField == null) return gp;
+
+            Object realGp = null;
+
+            // Approach 1: Paper API — extract GameProfile from CraftPlayerProfile
+            try {
+                Object pp = online.getClass().getMethod("getPlayerProfile").invoke(online);
+                for (Class<?> c = pp.getClass(); c != null; c = c.getSuperclass()) {
+                    try {
+                        Field f = c.getDeclaredField("profile");
+                        if (f.getType() == gpClass) {
+                            f.setAccessible(true);
+                            realGp = f.get(pp);
+                            break;
+                        }
+                    } catch (NoSuchFieldException ign) {}
+                }
+            } catch (Exception ignored) {}
+
+            // Approach 2: NMS — extract GameProfile from ServerPlayer.field
+            if (realGp == null) {
+                try {
                     Object craftPlayer = online.getClass().getMethod("getHandle").invoke(online);
-                    Object realGp = null;
                     for (Class<?> c = craftPlayer.getClass(); c != null; c = c.getSuperclass()) {
                         try {
                             Field f = c.getDeclaredField("gameProfile");
@@ -155,18 +179,21 @@ public class NMSHelper {
                             break;
                         } catch (NoSuchFieldException ign) {}
                     }
-                    if (realGp != null) {
-                        Object realProps = gpPropertiesField.get(realGp);
-                        Object botProps = gpPropertiesField.get(gp);
-                        if (realProps instanceof Map && botProps instanceof Map) {
-                            int cnt = ((Map) realProps).size();
-                            ((Map) botProps).putAll((Map) realProps);
-                            Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
-                        } else {
-                            Bukkit.getLogger().warning("[Mineflayer] Skin: type mismatch real=" + (realProps != null ? realProps.getClass().getName() : "null") + " bot=" + (botProps != null ? botProps.getClass().getName() : "null"));
-                        }
-                    }
+                } catch (Exception ignored) {}
+            }
+
+            if (realGp != null) {
+                Object realProps = gpPropertiesField.get(realGp);
+                Object botProps = gpPropertiesField.get(gp);
+                if (realProps instanceof Map && botProps instanceof Map) {
+                    int cnt = ((Map) realProps).size();
+                    ((Map) botProps).putAll((Map) realProps);
+                    Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
+                } else {
+                    Bukkit.getLogger().warning("[Mineflayer] Skin: type mismatch real=" + (realProps != null ? realProps.getClass().getName() : "null") + " bot=" + (botProps != null ? botProps.getClass().getName() : "null"));
                 }
+            } else {
+                Bukkit.getLogger().warning("[Mineflayer] Skin: could not find real GameProfile for " + name);
             }
             return gp;
         } catch (Exception e) {
