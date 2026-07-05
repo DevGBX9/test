@@ -328,8 +328,7 @@ public class NMSHelper {
                     Object realGp = extractRealGp(pp);
                     if (realGp != null) {
                         Bukkit.getLogger().info("[Mineflayer] Skin: extracted GameProfile from PlayerProfile");
-                        copyProperties(realGp, gp, name);
-                        return gp;
+                        if (copyProperties(realGp, gp, name)) return gp;
                     } else {
                         Bukkit.getLogger().info("[Mineflayer] Skin: no GameProfile field in PlayerProfile");
                     }
@@ -341,8 +340,7 @@ public class NMSHelper {
                     Object realGp = extractRealGp(craftPlayer);
                     if (realGp != null) {
                         Bukkit.getLogger().info("[Mineflayer] Skin: extracted GameProfile from ServerPlayer");
-                        copyProperties(realGp, gp, name);
-                        return gp;
+                        if (copyProperties(realGp, gp, name)) return gp;
                     } else {
                         Bukkit.getLogger().info("[Mineflayer] Skin: no GameProfile field in ServerPlayer");
                     }
@@ -379,25 +377,25 @@ public class NMSHelper {
         return null;
     }
 
-    private static void copyProperties(Object fromGp, Object toGp, String name) {
-        if (fromGp == null || toGp == null) return;
+    private static boolean copyProperties(Object fromGp, Object toGp, String name) {
+        if (fromGp == null || toGp == null) return false;
         try {
             Object fromProps = gpPropertiesField.get(fromGp);
             Object toProps = gpPropertiesField.get(toGp);
-            if (toProps == null) return;
+            if (toProps == null) return false;
             // Try fast-path: both are Map
             if (fromProps instanceof Map && toProps instanceof Map) {
                 int cnt = ((Map) fromProps).size();
                 ((Map) toProps).putAll((Map) fromProps);
                 if (cnt > 0) Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
-                return;
+                return cnt > 0;
             }
             // Try to read properties from source
             Object[] entries = readPropsArray(fromProps);
-            if (entries == null) {
+            if (entries == null || entries.length == 0) {
                 logMethods(fromProps, "source props");
                 Bukkit.getLogger().warning("[Mineflayer] Skin: cannot iterate source " + fromProps.getClass().getName());
-                return;
+                return false;
             }
             // Try to find a write method on target
             Method writeMethod = findWriteMethod(toProps);
@@ -426,10 +424,10 @@ public class NMSHelper {
                     }
                     gpPropertiesField.set(toGp, newMap);
                     Bukkit.getLogger().info("[Mineflayer] Skin: field replaced with LinkedHashMap for " + name);
-                    return;
+                    return !newMap.isEmpty();
                 } catch (Exception e2) {
                     Bukkit.getLogger().warning("[Mineflayer] Skin: field replacement failed: " + e2.getMessage());
-                    return;
+                    return false;
                 }
             }
             // Copy entries
@@ -490,8 +488,10 @@ public class NMSHelper {
             if (cnt > 0) {
                 Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
             }
+            return cnt > 0;
         } catch (Exception e) {
             Bukkit.getLogger().warning("[Mineflayer] Skin: copy failed: " + e);
+            return false;
         }
     }
 
