@@ -2,6 +2,7 @@ package devgbx9.mineflayer;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.entity.LookAnchor;
 import org.bukkit.entity.Player;
 
 import java.util.UUID;
@@ -90,7 +91,7 @@ public class BotNPC {
         double dist = bukkitPlayer.getLocation().distance(target.getLocation());
         if (dist <= 5) {
             bukkitPlayer.attack(target);
-            bukkitPlayer.lookAt(target.getEyeLocation());
+            bukkitPlayer.lookAt(target.getEyeLocation(), LookAnchor.EYES);
         }
     }
 }

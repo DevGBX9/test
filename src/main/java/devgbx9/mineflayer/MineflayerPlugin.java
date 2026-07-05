@@ -8,6 +8,7 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.LookAnchor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -61,7 +62,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                     }
 
                     if (target != null) {
-                        botPlayer.lookAt(target.getEyeLocation());
+                        botPlayer.lookAt(target.getEyeLocation(), LookAnchor.EYES);
                         bot.attackTarget();
                     }
                 }
