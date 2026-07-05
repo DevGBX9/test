@@ -105,13 +105,21 @@ public class BotNPC {
         double newY = loc.getY() + vy;
         double newZ = loc.getZ() + vz;
 
+        int bx = (int) Math.floor(newX);
+        int bz = (int) Math.floor(newZ);
         boolean onGround = false;
         if (vy <= 0) {
-            Block below = loc.getWorld().getBlockAt(loc.getBlockX(), (int) Math.floor(newY), loc.getBlockZ());
-            if (below.getType().isSolid() && newY - Math.floor(newY) < 0.01) {
-                newY = Math.floor(newY) + 0.01;
+            int by = (int) Math.floor(newY);
+            Block block = loc.getWorld().getBlockAt(bx, by, bz);
+            if (block.getType().isSolid()) {
+                newY = by + 1.0;
                 onGround = true;
             }
+        }
+
+        if (newY < loc.getWorld().getMinHeight()) {
+            newY = loc.getWorld().getHighestBlockYAt(bx, bz) + 1.0;
+            onGround = true;
         }
 
         loc.setX(newX);
