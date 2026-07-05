@@ -54,10 +54,12 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                     Player botPlayer = bot.getBukkitPlayer();
                     if (botPlayer == null || !botPlayer.isOnline()) continue;
 
-                    Player target = bot.getTarget();
-                    if (target == null || !target.isOnline() || !target.getWorld().equals(botPlayer.getWorld())) {
-                        target = findNearestPlayer(botPlayer);
-                        bot.setTarget(target);
+                    if (!bot.isWandering()) {
+                        Player target = bot.getTarget();
+                        if (target == null || !target.isOnline() || !target.getWorld().equals(botPlayer.getWorld())) {
+                            target = findNearestPlayer(botPlayer);
+                            bot.setTarget(target);
+                        }
                     }
 
                     bot.tick();
@@ -84,7 +86,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length < 1) {
-            sender.sendMessage("§6Usage: /mineflayer <add|delete> <name>");
+            sender.sendMessage("§6Usage: /mineflayer <add|delete|wander> <name>");
             return true;
         }
 
@@ -135,6 +137,26 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                 }
                 return true;
             }
+            case "wander": {
+                if (args.length < 2) {
+                    sender.sendMessage("§cUsage: /mineflayer wander <name> [on|off]");
+                    return true;
+                }
+                BotNPC bot = botManager.getBot(args[1]);
+                if (bot == null) {
+                    sender.sendMessage("§cBot '" + args[1] + "' not found.");
+                    return true;
+                }
+                boolean on;
+                if (args.length >= 3) {
+                    on = args[2].equalsIgnoreCase("on");
+                } else {
+                    on = !bot.isWandering();
+                }
+                bot.setWandering(on);
+                sender.sendMessage("§aBot '" + args[1] + "' wandering " + (on ? "ON" : "OFF") + ".");
+                return true;
+            }
         }
         return false;
     }
@@ -145,12 +167,13 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
             List<String> result = new ArrayList<>();
             result.add("add");
             result.add("delete");
+            result.add("wander");
             return result;
         }
         if (args.length == 2) {
             String prefix = args[1].toLowerCase();
             List<String> result = new ArrayList<>();
-            if (args[0].equalsIgnoreCase("delete")) {
+            if (args[0].equalsIgnoreCase("delete") || args[0].equalsIgnoreCase("wander")) {
                 for (String n : botManager.getBotNames()) {
                     if (n.toLowerCase().startsWith(prefix)) result.add(n);
                 }
@@ -160,6 +183,10 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                 }
             }
             return result;
+        }
+
+        if (args.length == 3 && args[0].equalsIgnoreCase("wander")) {
+            return List.of("on", "off");
         }
         return new ArrayList<>();
     }

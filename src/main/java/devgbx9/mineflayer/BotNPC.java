@@ -16,6 +16,9 @@ public class BotNPC {
     private Player bukkitPlayer;
     private boolean alive;
     private Player target;
+    private boolean wandering;
+    private Object wanderTarget;
+    private int wanderCooldown;
 
     public BotNPC(String name, UUID uuid) {
         this.name = name;
@@ -46,6 +49,18 @@ public class BotNPC {
 
     public Player getTarget() {
         return target;
+    }
+
+    public void setWandering(boolean w) {
+        this.wandering = w;
+        if (!w) {
+            wanderTarget = null;
+            wanderCooldown = 0;
+        }
+    }
+
+    public boolean isWandering() {
+        return wandering;
     }
 
     public void spawn(Location location, Player source) {
@@ -87,7 +102,13 @@ public class BotNPC {
     public void tick() {
         if (!alive || bukkitPlayer == null || !bukkitPlayer.isOnline()) return;
 
-        faceTarget();
+        if (target != null) {
+            faceTarget();
+        }
+        if (wandering && target == null) {
+            wanderTick();
+        }
+
         simulateMovement();
     }
 
@@ -178,5 +199,63 @@ public class BotNPC {
         Vector dir = target.getEyeLocation().toVector().subtract(eyeLoc.toVector());
         botLoc.setDirection(dir);
         bukkitPlayer.setRotation(botLoc.getYaw(), botLoc.getPitch());
+    }
+
+    private void wanderTick() {
+        if (--wanderCooldown > 0 && wanderTarget != null) {
+            // Continue moving toward current wander target
+            moveTowardWanderTarget();
+            return;
+        }
+
+        // Pick a new wander target using the official game algorithm
+        if (serverPlayer != null) {
+            wanderTarget = NMSHelper.findWanderPosition(serverPlayer, 10, 7);
+        }
+
+        if (wanderTarget != null) {
+            wanderCooldown = 40 + (int)(Math.random() * 40);
+            moveTowardWanderTarget();
+        } else {
+            wanderCooldown = 10;
+        }
+    }
+
+    private void moveTowardWanderTarget() {
+        if (wanderTarget == null) return;
+
+        double tx = NMSHelper.vec3X(wanderTarget);
+        double ty = NMSHelper.vec3Y(wanderTarget);
+        double tz = NMSHelper.vec3Z(wanderTarget);
+
+        Location loc = bukkitPlayer.getLocation();
+        double dx = tx - loc.getX();
+        double dz = tz - loc.getZ();
+        double distSq = dx * dx + dz * dz;
+
+        if (distSq < 0.25) {
+            wanderTarget = null;
+            return;
+        }
+
+        double dist = Math.sqrt(distSq);
+        double speed = 0.12;
+
+        Vector vel = bukkitPlayer.getVelocity();
+        vel.setX(dx / dist * speed);
+        vel.setY(0);
+        vel.setZ(dz / dist * speed);
+        bukkitPlayer.setVelocity(vel);
+
+        // Face the wander target
+        Location targetLoc = loc.clone();
+        targetLoc.setX(tx);
+        targetLoc.setZ(tz);
+        targetLoc.setY(ty);
+        Vector dir = targetLoc.toVector().subtract(loc.toVector());
+        if (dir.lengthSquared() > 0) {
+            loc.setDirection(dir);
+            bukkitPlayer.setRotation(loc.getYaw(), loc.getPitch());
+        }
     }
 }

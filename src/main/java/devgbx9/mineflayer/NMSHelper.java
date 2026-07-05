@@ -254,6 +254,29 @@ public class NMSHelper {
         return (Player) serverPlayer.getClass().getMethod("getBukkitEntity").invoke(serverPlayer);
     }
 
+    public static Object findWanderPosition(Object serverPlayer, int hRange, int vRange) {
+        try {
+            Class<?> cls = Class.forName("net.minecraft.world.entity.ai.util.DefaultRandomPos");
+            Class<?> leCls = Class.forName("net.minecraft.world.entity.LivingEntity");
+            Method getPos = cls.getMethod("getPos", leCls, int.class, int.class);
+            return getPos.invoke(null, serverPlayer, hRange, vRange);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public static double vec3X(Object nmsVec3) {
+        try { return (double) nmsVec3.getClass().getMethod("x").invoke(nmsVec3); } catch (Exception e) { return 0; }
+    }
+
+    public static double vec3Y(Object nmsVec3) {
+        try { return (double) nmsVec3.getClass().getMethod("y").invoke(nmsVec3); } catch (Exception e) { return 0; }
+    }
+
+    public static double vec3Z(Object nmsVec3) {
+        try { return (double) nmsVec3.getClass().getMethod("z").invoke(nmsVec3); } catch (Exception e) { return 0; }
+    }
+
     // --- Connection ---
 
     private static Object createConnection() {
