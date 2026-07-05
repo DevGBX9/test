@@ -2,8 +2,8 @@ package devgbx9.mineflayer;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.entity.LookAnchor;
 import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
 
 import java.util.UUID;
 
@@ -55,7 +55,6 @@ public class BotNPC {
                 serverPlayer = NMSHelper.createAndJoinFakePlayer(name, uuid, location, source);
                 bukkitPlayer = NMSHelper.toBukkitPlayer(serverPlayer);
                 bukkitPlayer.teleport(location);
-                bukkitPlayer.setMaximumNoDamageTicks(0);
                 NMSHelper.broadcastJoinMessage(name);
                 Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' spawned at " + location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ());
                 alive = true;
@@ -84,14 +83,13 @@ public class BotNPC {
         alive = false;
     }
 
-    public void attackTarget() {
+    public void faceTarget() {
         if (!alive || bukkitPlayer == null || !bukkitPlayer.isOnline()) return;
         if (target == null || !target.isOnline() || !target.getWorld().equals(bukkitPlayer.getWorld())) return;
 
-        double dist = bukkitPlayer.getLocation().distance(target.getLocation());
-        if (dist <= 5) {
-            bukkitPlayer.attack(target);
-            bukkitPlayer.lookAt(target.getEyeLocation(), LookAnchor.EYES);
-        }
+        Location botLoc = bukkitPlayer.getLocation().clone();
+        Vector dir = target.getEyeLocation().toVector().subtract(botLoc.toVector());
+        botLoc.setDirection(dir);
+        bukkitPlayer.teleport(botLoc);
     }
 }
