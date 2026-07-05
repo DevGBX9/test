@@ -88,8 +88,9 @@ public class BotNPC {
         if (target == null || !target.isOnline() || !target.getWorld().equals(bukkitPlayer.getWorld())) return;
 
         Location botLoc = bukkitPlayer.getLocation().clone();
-        Vector dir = target.getEyeLocation().toVector().subtract(botLoc.toVector());
+        Location eyeLoc = bukkitPlayer.getEyeLocation();
+        Vector dir = target.getEyeLocation().toVector().subtract(eyeLoc.toVector());
         botLoc.setDirection(dir);
-        bukkitPlayer.teleport(botLoc);
+        bukkitPlayer.setRotation(botLoc.getYaw(), botLoc.getPitch());
     }
 }
