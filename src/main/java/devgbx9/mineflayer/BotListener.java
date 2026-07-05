@@ -76,9 +76,9 @@ public class BotListener implements Listener {
             double strength = 0.4;
 
             Vector vel = damaged.getVelocity();
-            vel.setX(vel.getX() / 2.0 - nx * strength);
-            vel.setY(damaged.isOnGround() ? Math.min(0.4, vel.getY() / 2.0 + strength) : vel.getY());
-            vel.setZ(vel.getZ() / 2.0 - nz * strength);
+            vel.setX(vel.getX() / 2.0 + nx * strength);
+            vel.setY(Math.min(0.4, vel.getY() / 2.0 + strength));
+            vel.setZ(vel.getZ() / 2.0 + nz * strength);
             damaged.setVelocity(vel);
         }
     }
