@@ -183,37 +183,55 @@ public class NMSHelper {
             Object gp = gameProfileConstructor.newInstance(uuid, name);
             if (gpPropertiesField == null) return gp;
 
-            // Use Paper PlayerProfile API to transfer properties (avoids MutablePropertyMap cast issue)
+            // Use Paper PlayerProfile API: fetch ProfileProperties, convert to Mojang Properties, put directly into bot's PropertyMap
             try {
                 Class<?> bukkitCls = Class.forName("org.bukkit.Bukkit");
                 Class<?> ppClass = Class.forName("com.destroystokyo.paper.profile.ProfileProperty");
 
-                // Profile for the bot
-                Object botProfile = bukkitCls.getMethod("createPlayerProfile", UUID.class, String.class).invoke(null, uuid, name);
-                // Profile to fetch from Mojang
                 Object fetchedProfile = bukkitCls.getMethod("createPlayerProfile", String.class).invoke(null, name);
                 boolean ok = (boolean) fetchedProfile.getClass().getMethod("complete", boolean.class).invoke(fetchedProfile, true);
 
-                Method getProps = fetchedProfile.getClass().getMethod("getProperties");
-                Method setProp = botProfile.getClass().getMethod("setProperty", ppClass);
-
+                Object propsSource;
                 if (ok) {
-                    Collection<?> props = (Collection<?>) getProps.invoke(fetchedProfile);
-                    for (Object prop : props) {
-                        setProp.invoke(botProfile, prop);
-                    }
-                    Bukkit.getLogger().info("[Mineflayer] Skin: fetched " + props.size() + " properties online for " + name);
+                    propsSource = fetchedProfile;
                 } else if (source != null) {
-                    Object srcProfile = source.getClass().getMethod("getPlayerProfile").invoke(source);
-                    Collection<?> props = (Collection<?>) getProps.invoke(srcProfile);
-                    for (Object prop : props) {
-                        setProp.invoke(botProfile, prop);
-                    }
-                    Bukkit.getLogger().info("[Mineflayer] Skin: copied " + props.size() + " properties from source for " + name);
+                    propsSource = source.getClass().getMethod("getPlayerProfile").invoke(source);
+                } else {
+                    return gp;
                 }
 
-                Object realGp = extractRealGp(botProfile);
-                if (realGp != null) return realGp;
+                Object gpProps = gpPropertiesField.get(gp);
+                if (gpProps == null) return gp;
+
+                Method getProps = propsSource.getClass().getMethod("getProperties");
+                Collection<?> props = (Collection<?>) getProps.invoke(propsSource);
+
+                if (props.isEmpty()) {
+                    if (source != null) {
+                        propsSource = source.getClass().getMethod("getPlayerProfile").invoke(source);
+                        props = (Collection<?>) getProps.invoke(propsSource);
+                    }
+                    if (props.isEmpty()) return gp;
+                }
+
+                // Convert each ProfileProperty to com.mojang.authlib.properties.Property and put into bot's PropertyMap
+                Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
+                Constructor<?> propCtor = propCls.getConstructor(String.class, String.class, String.class);
+                Method gpName = ppClass.getMethod("getName");
+                Method gpValue = ppClass.getMethod("getValue");
+                Method gpSignature = ppClass.getMethod("getSignature");
+
+                @SuppressWarnings("unchecked")
+                Map<String, Object> propMap = (Map<String, Object>) gpProps;
+                for (Object pp : props) {
+                    String pName = (String) gpName.invoke(pp);
+                    String pValue = (String) gpValue.invoke(pp);
+                    String pSig = (String) gpSignature.invoke(pp);
+                    Object property = propCtor.newInstance(pName, pValue, pSig);
+                    propMap.put(pName, property);
+                }
+                Bukkit.getLogger().info("[Mineflayer] Skin: applied " + props.size() + " properties for " + name);
+                return gp;
             } catch (Exception e) {
                 Bukkit.getLogger().info("[Mineflayer] Skin: Paper API path skipped (" + e.getMessage() + ")");
             }
