@@ -154,7 +154,7 @@ public class NMSHelper {
                         f.setAccessible(true);
                         return f.get(obj);
                     }
-                } catch (NoSuchFieldException ign) {}
+                } catch (ReflectiveOperationException ign) {}
             }
         }
         return null;
