@@ -9,6 +9,7 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.util.Vector;
 
 public class BotListener implements Listener {
 
@@ -69,9 +70,16 @@ public class BotListener implements Listener {
                 dx = (Math.random() - Math.random()) * 0.01;
                 dz = (Math.random() - Math.random()) * 0.01;
             }
-            try {
-                NMSHelper.applyKnockback(bot.getServerPlayer(), 0.4, dx, dz);
-            } catch (Exception ignored) {}
+            double len = Math.sqrt(dx * dx + dz * dz);
+            double nx = dx / len;
+            double nz = dz / len;
+            double strength = 0.4;
+
+            Vector vel = damaged.getVelocity();
+            vel.setX(vel.getX() / 2.0 - nx * strength);
+            vel.setY(damaged.isOnGround() ? Math.min(0.4, vel.getY() / 2.0 + strength) : vel.getY());
+            vel.setZ(vel.getZ() / 2.0 - nz * strength);
+            damaged.setVelocity(vel);
         }
     }
 }

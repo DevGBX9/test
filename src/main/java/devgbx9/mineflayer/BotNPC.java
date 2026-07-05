@@ -2,6 +2,7 @@ package devgbx9.mineflayer;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
@@ -47,10 +48,6 @@ public class BotNPC {
         return target;
     }
 
-    public Object getServerPlayer() {
-        return serverPlayer;
-    }
-
     public void spawn(Location location, Player source) {
         if (alive) return;
 
@@ -91,12 +88,46 @@ public class BotNPC {
         if (!alive || bukkitPlayer == null || !bukkitPlayer.isOnline()) return;
 
         faceTarget();
+        simulateMovement();
+    }
 
-        if (serverPlayer != null) {
-            try {
-                NMSHelper.simulateMovement(serverPlayer);
-            } catch (Exception ignored) {}
+    private void simulateMovement() {
+        Vector vel = bukkitPlayer.getVelocity();
+        double vx = vel.getX(), vy = vel.getY(), vz = vel.getZ();
+        if (Math.abs(vx) < 0.001 && Math.abs(vy) < 0.001 && Math.abs(vz) < 0.001) return;
+
+        vy -= 0.08;
+        vx *= 0.98;
+        vz *= 0.98;
+
+        Location loc = bukkitPlayer.getLocation().clone();
+        double newX = loc.getX() + vx;
+        double newY = loc.getY() + vy;
+        double newZ = loc.getZ() + vz;
+
+        boolean onGround = false;
+        if (vy <= 0) {
+            Block below = loc.getWorld().getBlockAt(loc.getBlockX(), (int) Math.floor(newY), loc.getBlockZ());
+            if (below.getType().isSolid() && newY - Math.floor(newY) < 0.01) {
+                newY = Math.floor(newY) + 0.01;
+                onGround = true;
+            }
         }
+
+        loc.setX(newX);
+        loc.setY(newY);
+        loc.setZ(newZ);
+        bukkitPlayer.teleport(loc);
+
+        if (onGround) {
+            vx *= 0.6;
+            vz *= 0.6;
+            vy = 0;
+        } else {
+            vy *= 0.98;
+        }
+
+        bukkitPlayer.setVelocity(new Vector(vx, vy, vz));
     }
 
     private void faceTarget() {
