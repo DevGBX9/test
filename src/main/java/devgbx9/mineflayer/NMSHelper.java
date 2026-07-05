@@ -80,7 +80,7 @@ public class NMSHelper {
                     m.setAccessible(true);
                     serverLevelAddPlayer = m;
                     break;
-                } catch (NoSuchMethodException ignored) {}
+                } catch (NoSuchMethodException ign) {}
             }
             if (serverLevelAddPlayer == null) {
                 Class<?> entityCls = Class.forName("net.minecraft.world.entity.Entity");
@@ -90,7 +90,7 @@ public class NMSHelper {
                         m.setAccessible(true);
                         serverLevelAddPlayer = m;
                         break;
-                    } catch (NoSuchMethodException ignored) {}
+                    } catch (NoSuchMethodException ign) {}
                 }
             }
 
@@ -103,7 +103,7 @@ public class NMSHelper {
                 try {
                     gpPropertiesField = c.getDeclaredField("properties");
                     gpPropertiesField.setAccessible(true);
-                } catch (NoSuchFieldException ignored) {}
+                } catch (NoSuchFieldException ign) {}
             }
             if (gpPropertiesField == null) {
                 Bukkit.getLogger().warning("[Mineflayer] Cannot find GameProfile.properties field, skin copy disabled");
@@ -155,7 +155,7 @@ public class NMSHelper {
                             f.setAccessible(true);
                             realGp = f.get(craftPlayer);
                             break;
-                        } catch (NoSuchFieldException ignored) {}
+                        } catch (NoSuchFieldException ign) {}
                     }
                     if (realGp != null) {
                         Object realProps = gpPropertiesField.get(realGp);
@@ -283,7 +283,7 @@ public class NMSHelper {
                 Object conn = connectionConstructor.newInstance(packetFlowServerbound);
                 fillConnectionFields(conn);
                 return conn;
-            } catch (Exception ignored) {}
+            } catch (Exception ex) {}
         }
         if (unsafe != null) {
             try {
@@ -298,22 +298,22 @@ public class NMSHelper {
                 }
                 fillConnectionFields(conn);
                 return conn;
-            } catch (Exception ignored) {}
+            } catch (Exception ex) {}
         }
         return null;
     }
 
     private static void fillConnectionFields(Object conn) {
         if (connectionAddressField != null) {
-            try { connectionAddressField.set(conn, new InetSocketAddress("127.0.0.1", 0)); } catch (Exception ignored) {}
+            try { connectionAddressField.set(conn, new InetSocketAddress("127.0.0.1", 0)); } catch (Exception ex1) {}
         }
         if (connectionChannelField != null) {
             try {
                 Class<?> ecCls = Class.forName("io.netty.channel.embedded.EmbeddedChannel");
                 Object ec = ecCls.getDeclaredConstructor().newInstance();
                 connectionChannelField.set(conn, ec);
-            } catch (Exception ignored) {
-                try { connectionChannelField.set(conn, null); } catch (Exception ignored) {}
+            } catch (Exception ex2) {
+                try { connectionChannelField.set(conn, null); } catch (Exception ex3) {}
             }
         }
     }
@@ -324,14 +324,14 @@ public class NMSHelper {
             Field f = u.getDeclaredField("theUnsafe");
             f.setAccessible(true);
             unsafe = f.get(null);
-        } catch (Exception ignored) {}
+        } catch (Exception ex) {}
     }
 
     // --- helpers ---
 
     private static Class<?> resolveClass(String... names) {
         for (String n : names) {
-            try { return Class.forName(n); } catch (ClassNotFoundException ignored) {}
+            try { return Class.forName(n); } catch (ClassNotFoundException ign) {}
         }
         return null;
     }
