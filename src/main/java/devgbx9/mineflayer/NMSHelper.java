@@ -161,7 +161,9 @@ public class NMSHelper {
                         Object realProps = gpPropertiesField.get(realGp);
                         Object botProps = gpPropertiesField.get(gp);
                         if (realProps instanceof Map && botProps instanceof Map) {
+                            int cnt = ((Map) realProps).size();
                             ((Map) botProps).putAll((Map) realProps);
+                            if (cnt > 0) Bukkit.getLogger().info("[Mineflayer] Skin: copied " + cnt + " properties for " + name);
                         }
                     }
                 }
@@ -183,10 +185,6 @@ public class NMSHelper {
         Object clientInfo = clientInformationCreateDefault.invoke(null);
         Object serverPlayer = serverPlayerConstructor.newInstance(nmsServer, serverLevel, profile, clientInfo);
 
-        if (serverPlayerSetPos != null) {
-            serverPlayerSetPos.invoke(serverPlayer, location.getX(), location.getY(), location.getZ());
-        }
-
         Object conn = createConnection();
         Object cookie = null;
         if (cookieCreateInitial != null) {
@@ -197,6 +195,11 @@ public class NMSHelper {
             try {
                 Object listener = gamePacketListenerConstructor.newInstance(nmsServer, conn, serverPlayer, cookie);
                 serverPlayerConnectionField.set(serverPlayer, listener);
+                // Configure network pipeline so disconnect() triggers PlayerQuitEvent (/kick fix)
+                try {
+                    Method cfg = connectionCls.getMethod("configureSerializationAfterHandshake", listener.getClass());
+                    cfg.invoke(conn, listener);
+                } catch (Exception ignored) {}
             } catch (Exception e) {
                 Bukkit.getLogger().warning("[Mineflayer] set listener failed: " + e.getMessage());
             }
@@ -208,6 +211,9 @@ public class NMSHelper {
             try {
                 playerListPlaceNewPlayer.invoke(playerList, conn, serverPlayer, cookie);
                 Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' placeNewPlayer OK");
+                if (serverPlayerSetPos != null) {
+                    serverPlayerSetPos.invoke(serverPlayer, location.getX(), location.getY(), location.getZ());
+                }
                 return serverPlayer;
             } catch (Exception e) {
                 Bukkit.getLogger().warning("[Mineflayer] placeNewPlayer failed: " + e.getMessage());
@@ -242,7 +248,12 @@ public class NMSHelper {
             Bukkit.getLogger().warning("[Mineflayer] No method found to add player to world");
         }
 
-        Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' registered manually");
+        // Set position AFTER everything so the bot appears at the right place
+        if (serverPlayerSetPos != null) {
+            serverPlayerSetPos.invoke(serverPlayer, location.getX(), location.getY(), location.getZ());
+        }
+
+        Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' registered manually at " + location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ());
         return serverPlayer;
     }
 
