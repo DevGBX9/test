@@ -8,3 +8,9 @@ commands:
   mineflayer:
     description: Mineflayer plugin commands
     usage: /<command> test
+    permission: mineflayer.use
+
+permissions:
+  mineflayer.use:
+    description: Allows using Mineflayer commands
+    default: true

@@ -1,7 +1,6 @@
 package devgbx9.mineflayer;
 
 import org.bukkit.Location;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.HashMap;
 import java.util.List;
@@ -32,7 +31,6 @@ public class BotManager {
         return bots.containsKey(name.toLowerCase());
     }
 
-    @Nullable
     public BotNPC getBot(String name) {
         return bots.get(name.toLowerCase());
     }

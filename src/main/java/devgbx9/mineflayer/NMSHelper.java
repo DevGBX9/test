@@ -25,9 +25,12 @@ public class NMSHelper {
     private static Constructor<?> serverPlayerConstructor;
     private static Method serverPlayerSetPos;
     private static Field serverPlayerConnectionField;
+    private static Method serverLevelAddPlayer;
 
     private static Method clientInformationCreateDefault;
     private static Constructor<?> gameProfileConstructor;
+    private static Class<?> gpClass;
+    private static Method gpGetProperties;
 
     private static Object packetFlowServerbound;
     private static Constructor<?> connectionConstructor;
@@ -44,6 +47,8 @@ public class NMSHelper {
 
     private static Constructor<?> gamePacketListenerConstructor;
     private static Method cookieCreateInitial;
+
+    private static Constructor<?> resolvableProfileFromGp;
 
     public static boolean isAvailable() {
         return initialized;
@@ -67,11 +72,21 @@ public class NMSHelper {
             serverPlayerConstructor = findConstructor(serverPlayerCls, 4);
             serverPlayerSetPos = findMethod(serverPlayerCls, "setPos", 3);
 
+            Class<?> serverLevelCls2 = Class.forName("net.minecraft.server.level.ServerLevel");
+            for (Method m : serverLevelCls2.getDeclaredMethods()) {
+                if (m.getParameterCount() == 1 && m.getName().contains("Player")) {
+                    serverLevelAddPlayer = m;
+                    serverLevelAddPlayer.setAccessible(true);
+                    break;
+                }
+            }
+
             Class<?> clientInfoCls = Class.forName("net.minecraft.server.level.ClientInformation");
             clientInformationCreateDefault = clientInfoCls.getMethod("createDefault");
 
-            gameProfileConstructor = Class.forName("com.mojang.authlib.GameProfile")
-                .getConstructor(UUID.class, String.class);
+            gpClass = Class.forName("com.mojang.authlib.GameProfile");
+            gameProfileConstructor = gpClass.getConstructor(UUID.class, String.class);
+            gpGetProperties = gpClass.getMethod("getProperties");
 
             Class<?> packetFlowCls = resolveClass("net.minecraft.network.PacketFlow", "net.minecraft.network.protocol.PacketFlow");
             if (packetFlowCls != null) {
@@ -98,10 +113,43 @@ public class NMSHelper {
             gamePacketListenerConstructor = findConstructor(listenerCls, 4);
             serverPlayerConnectionField = findFieldByType(serverPlayerCls, "ServerGamePacketListenerImpl");
 
+            try {
+                Class<?> rpCls = Class.forName("io.papermc.paper.datacomponent.item.ResolvableProfile");
+                resolvableProfileFromGp = findStaticMethod(rpCls, "resolvableProfile", gpClass);
+            } catch (Exception ignored) {}
+
             initialized = true;
-            Bukkit.getLogger().info("[Mineflayer] NMS reflection ready");
+            Bukkit.getLogger().info("[Mineflayer] NMS ready");
         } catch (Exception e) {
             Bukkit.getLogger().severe("[Mineflayer] NMS init failed: " + e.getMessage());
+        }
+    }
+
+    public static Object createGameProfileWithSkin(UUID uuid, String name) {
+        try {
+            Object gp = gameProfileConstructor.newInstance(uuid, name);
+            Player online = Bukkit.getPlayerExact(name);
+            if (online != null) {
+                Object craftPlayer = online.getClass().getMethod("getHandle").invoke(online);
+                Object realGp = null;
+                for (Class<?> c = craftPlayer.getClass(); c != null; c = c.getSuperclass()) {
+                    try {
+                        Field f = c.getDeclaredField("gameProfile");
+                        f.setAccessible(true);
+                        realGp = f.get(craftPlayer);
+                        break;
+                    } catch (NoSuchFieldException ignored) {}
+                }
+                if (realGp != null) {
+                    Object realProps = gpGetProperties.invoke(realGp);
+                    Object botProps = gpGetProperties.invoke(gp);
+                    Method putAll = botProps.getClass().getMethod("putAll", Map.class);
+                    putAll.invoke(botProps, realProps);
+                }
+            }
+            return gp;
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -109,9 +157,11 @@ public class NMSHelper {
         Object nmsServer = craftServerGetServer.invoke(Bukkit.getServer());
         Object serverLevel = craftWorldGetHandle.invoke(location.getWorld());
 
-        Object profile = gameProfileConstructor.newInstance(uuid, name);
+        Object profile = createGameProfileWithSkin(uuid, name);
+        if (profile == null) {
+            profile = gameProfileConstructor.newInstance(uuid, name);
+        }
         Object clientInfo = clientInformationCreateDefault.invoke(null);
-
         Object serverPlayer = serverPlayerConstructor.newInstance(nmsServer, serverLevel, profile, clientInfo);
 
         if (serverPlayerSetPos != null) {
@@ -129,7 +179,7 @@ public class NMSHelper {
                 Object listener = gamePacketListenerConstructor.newInstance(nmsServer, conn, serverPlayer, cookie);
                 serverPlayerConnectionField.set(serverPlayer, listener);
             } catch (Exception e) {
-                Bukkit.getLogger().warning("[Mineflayer] Failed to set player connection: " + e.getMessage());
+                Bukkit.getLogger().warning("[Mineflayer] set listener failed: " + e.getMessage());
             }
         }
 
@@ -138,35 +188,40 @@ public class NMSHelper {
         if (playerListPlaceNewPlayer != null && conn != null && cookie != null) {
             try {
                 playerListPlaceNewPlayer.invoke(playerList, conn, serverPlayer, cookie);
-                Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' registered via placeNewPlayer");
+                Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' placeNewPlayer OK");
                 return serverPlayer;
             } catch (Exception e) {
                 Bukkit.getLogger().warning("[Mineflayer] placeNewPlayer failed: " + e.getMessage());
-                e.printStackTrace();
             }
         }
 
-        // Manual registration fallback
+        // Manual fallback
         if (playerListPlayersField != null) {
             @SuppressWarnings("unchecked")
             List<Object> players = (List<Object>) playerListPlayersField.get(playerList);
             players.add(serverPlayer);
         }
-
         if (playerListByNameField != null) {
             @SuppressWarnings("unchecked")
             Map<String, Object> byName = (Map<String, Object>) playerListByNameField.get(playerList);
             byName.put(name.toLowerCase(java.util.Locale.ENGLISH), serverPlayer);
         }
-
         if (playerListByUUIDField != null) {
             @SuppressWarnings("unchecked")
             Map<UUID, Object> byUUID = (Map<UUID, Object>) playerListByUUIDField.get(playerList);
             byUUID.put(uuid, serverPlayer);
         }
 
-        Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' registered manually");
+        // Add to world so the ServerPlayer entity is visible
+        if (serverLevelAddPlayer != null) {
+            try {
+                serverLevelAddPlayer.invoke(serverLevel, serverPlayer);
+            } catch (Exception e) {
+                Bukkit.getLogger().warning("[Mineflayer] add to world failed: " + e.getMessage());
+            }
+        }
 
+        Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' registered manually");
         return serverPlayer;
     }
 
@@ -198,11 +253,10 @@ public class NMSHelper {
         return (Player) serverPlayer.getClass().getMethod("getBukkitEntity").invoke(serverPlayer);
     }
 
-    // ---------- Connection creation ----------
+    // --- Connection ---
 
     private static Object createConnection() {
         if (packetFlowServerbound == null || connectionCls == null) return null;
-
         if (connectionConstructor != null) {
             try {
                 Object conn = connectionConstructor.newInstance(packetFlowServerbound);
@@ -210,26 +264,21 @@ public class NMSHelper {
                 return conn;
             } catch (Exception ignored) {}
         }
-
         if (unsafe != null) {
             try {
-                Method allocate = unsafe.getClass().getMethod("allocateInstance", Class.class);
-                Object conn = allocate.invoke(unsafe, connectionCls);
-
+                Method alloc = unsafe.getClass().getMethod("allocateInstance", Class.class);
+                Object conn = alloc.invoke(unsafe, connectionCls);
                 for (Field f : connectionCls.getDeclaredFields()) {
-                    Class<?> ft = f.getType();
-                    if (ft.isEnum() && ft.getName().contains("PacketFlow")) {
+                    if (f.getType().isEnum() && f.getType().getName().contains("PacketFlow")) {
                         f.setAccessible(true);
                         f.set(conn, packetFlowServerbound);
                         break;
                     }
                 }
-
                 fillConnectionFields(conn);
                 return conn;
             } catch (Exception ignored) {}
         }
-
         return null;
     }
 
@@ -244,14 +293,14 @@ public class NMSHelper {
 
     private static void setupUnsafe() {
         try {
-            Class<?> unsafeCls = Class.forName("sun.misc.Unsafe");
-            Field f = unsafeCls.getDeclaredField("theUnsafe");
+            Class<?> u = Class.forName("sun.misc.Unsafe");
+            Field f = u.getDeclaredField("theUnsafe");
             f.setAccessible(true);
             unsafe = f.get(null);
         } catch (Exception ignored) {}
     }
 
-    // ---------- helpers ----------
+    // --- helpers ---
 
     private static Class<?> resolveClass(String... names) {
         for (String n : names) {
@@ -268,13 +317,7 @@ public class NMSHelper {
     }
 
     private static Field getAccessibleField(Class<?> cls, String name) {
-        try {
-            Field f = cls.getDeclaredField(name);
-            f.setAccessible(true);
-            return f;
-        } catch (NoSuchFieldException e) {
-            return null;
-        }
+        try { Field f = cls.getDeclaredField(name); f.setAccessible(true); return f; } catch (NoSuchFieldException e) { return null; }
     }
 
     private static Method findMethod(Class<?> cls, String name, int paramCount) {
@@ -289,42 +332,34 @@ public class NMSHelper {
 
     private static Constructor<?> findConstructor(Class<?> cls, int paramCount) {
         for (Constructor<?> c : cls.getDeclaredConstructors()) {
-            if (c.getParameterCount() == paramCount) {
-                c.setAccessible(true);
-                return c;
-            }
+            if (c.getParameterCount() == paramCount) { c.setAccessible(true); return c; }
         }
         return null;
     }
 
-    private static Constructor<?> findCompatibleConstructor(Class<?> cls, Class<?> firstParamType) {
-        if (firstParamType == null) return null;
+    private static Constructor<?> findCompatibleConstructor(Class<?> cls, Class<?> first) {
+        if (first == null) return null;
         for (Constructor<?> c : cls.getDeclaredConstructors()) {
-            Class<?>[] params = c.getParameterTypes();
-            if (params.length >= 1 && params[0].isAssignableFrom(firstParamType)) {
-                c.setAccessible(true);
-                return c;
-            }
+            Class<?>[] p = c.getParameterTypes();
+            if (p.length >= 1 && p[0].isAssignableFrom(first)) { c.setAccessible(true); return c; }
         }
         return null;
     }
 
-    private static Field findFieldByType(Class<?> cls, String simpleTypeName) {
+    private static Method findStaticMethod(Class<?> cls, String name, Class<?>... paramTypes) {
+        try { return cls.getMethod(name, paramTypes); } catch (Exception e) { return null; }
+    }
+
+    private static Field findFieldByType(Class<?> cls, String simple) {
         for (Field f : cls.getDeclaredFields()) {
-            if (f.getType().getSimpleName().equals(simpleTypeName)) {
-                f.setAccessible(true);
-                return f;
-            }
+            if (f.getType().getSimpleName().equals(simple)) { f.setAccessible(true); return f; }
         }
         return null;
     }
 
     private static Field findListField(Class<?> cls) {
         for (Field f : cls.getDeclaredFields()) {
-            if (List.class.isAssignableFrom(f.getType())) {
-                f.setAccessible(true);
-                return f;
-            }
+            if (List.class.isAssignableFrom(f.getType())) { f.setAccessible(true); return f; }
         }
         return null;
     }
