@@ -22,8 +22,6 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
     @Override
     public void onEnable() {
         saveDefaultConfig();
-        String key = getConfig().getString("mineskin-api-key", "");
-        NMSHelper.setMineSkinKey(key);
 
         getCommand("mineflayer").setExecutor(this);
         getCommand("mineflayer").setTabCompleter(this);
