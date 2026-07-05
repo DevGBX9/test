@@ -9,6 +9,7 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.util.Vector;
 
 public class BotListener implements Listener {
 
@@ -59,11 +60,12 @@ public class BotListener implements Listener {
         BotNPC bot = botManager.getBot(damaged.getName());
         if (bot == null || !bot.isAlive()) return;
 
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (damaged.isOnline()) {
-                damaged.setHealth(damaged.getMaxHealth());
-                damaged.setFireTicks(0);
-            }
-        }, 1L);
+        event.setCancelled(true);
+        damaged.setFireTicks(0);
+
+        if (event.getDamager() instanceof Player attacker) {
+            Vector dir = damaged.getLocation().toVector().subtract(attacker.getLocation().toVector()).normalize();
+            damaged.teleport(damaged.getLocation().add(dir.multiply(1.5)).add(0, 0.3, 0));
+        }
     }
 }
