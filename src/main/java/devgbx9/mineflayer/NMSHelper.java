@@ -48,7 +48,7 @@ public class NMSHelper {
     private static Constructor<?> gamePacketListenerConstructor;
     private static Method cookieCreateInitial;
 
-    private static Constructor<?> resolvableProfileFromGp;
+    private static Method resolvableProfileFromGp;
 
     public static boolean isAvailable() {
         return initialized;
