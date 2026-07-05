@@ -226,9 +226,8 @@ public class NMSHelper {
         if (MINESKIN_KEY == null || MINESKIN_KEY.isEmpty()) return false;
         try {
             HttpClient client = HttpClient.newHttpClient();
-            // Try to fetch real UUID from Mojang API, fallback to Notch UUID
             String uuid = fetchUuidFromMojang(skinName);
-            if (uuid == null) uuid = "069a79f4-44e9-4726-a5be-fca90e38aaf5"; // Notch
+            if (uuid == null) uuid = "069a79f4-44e9-4726-a5be-fca90e38aaf5";
             String json = "{\"user\":\"" + uuid + "\",\"visibility\":\"public\",\"variant\":\"classic\"}";
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://api.mineskin.org/v2/generate"))
@@ -238,35 +237,40 @@ public class NMSHelper {
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
             HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                Bukkit.getLogger().info("[Mineflayer] Skin: MineSkin HTTP " + resp.statusCode() + " for URL fallback");
-                // Log response body for debugging
-                Bukkit.getLogger().info("[Mineflayer] Skin: MineSkin response: " + resp.body());
-                return false;
-            }
             String body = resp.body();
+            Bukkit.getLogger().info("[Mineflayer] Skin: MineSkin HTTP " + resp.statusCode() + " for " + skinName + ": " + (body.length() > 200 ? body.substring(0, 200) + "..." : body));
+            if (resp.statusCode() != 200) return false;
+            // Try flat format first, then nested data.texture format
             String value = extractJsonStr(body, "value");
             String signature = extractJsonStr(body, "signature");
+            if (value == null) {
+                int dataStart = body.indexOf("\"data\"");
+                if (dataStart >= 0) {
+                    String dataSection = body.substring(dataStart);
+                    int texStart = dataSection.indexOf("\"texture\"");
+                    if (texStart >= 0) {
+                        String texSection = dataSection.substring(texStart);
+                        value = extractJsonStr(texSection, "value");
+                        signature = extractJsonStr(texSection, "signature");
+                    }
+                }
+            }
             if (value == null || signature == null) {
-                Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin response missing textures");
+                Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin response missing textures: " + (body.length() > 500 ? body.substring(0, 500) : body));
                 return false;
             }
             Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
             Constructor<?> ctor = propCls.getConstructor(String.class, String.class, String.class);
             Object prop = ctor.newInstance("textures", value, signature);
-            Method write = findWriteMethod(gpProps);
-            if (write == null) return false;
-            if (write.getParameterCount() == 2) {
-                write.invoke(gpProps, "textures", prop);
-            } else {
-                write.invoke(gpProps, prop);
-            }
+            // gpProps is a Map<String,Property> — put without reflection
+            ((Map) gpProps).put("textures", prop);
             Bukkit.getLogger().info("[Mineflayer] Skin: applied from MineSkin for " + logName);
             return true;
         } catch (Exception e) {
             Bukkit.getLogger().warning("[Mineflayer] Skin: MineSkin error (" + e.getClass().getSimpleName() + "): " + e.getMessage());
             if (e.getCause() != null) {
-                Bukkit.getLogger().warning("[Mineflayer] Skin: Cause (" + e.getCause().getClass().getSimpleName() + "): " + e.getCause().getMessage());
+                Throwable cause = e.getCause();
+                Bukkit.getLogger().warning("[Mineflayer] Skin: Cause (" + cause.getClass().getSimpleName() + "): " + cause.getMessage());
             }
             return false;
         }
