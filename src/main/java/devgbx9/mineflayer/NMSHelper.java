@@ -179,14 +179,21 @@ public class NMSHelper {
         }
         Bukkit.getLogger().info(sb.toString());
     }
+    private static Method findAccessorMethod(Class<?> clazz, String... names) throws NoSuchMethodException {
+        NoSuchMethodException last = null;
+        for (String name : names) {
+            try { return clazz.getMethod(name); } catch (NoSuchMethodException e) { last = e; }
+        }
+        throw last;
+    }
 
     private static int putPropsFromArray(Object[] propsArr, Object gpProps, String name) throws Exception {
         Class<?> ppCls = Class.forName("com.destroystokyo.paper.profile.ProfileProperty");
         Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
         Constructor<?> propCtor = propCls.getConstructor(String.class, String.class, String.class);
-        Method ppGetName = ppCls.getMethod("getName");
-        Method ppGetValue = ppCls.getMethod("getValue");
-        Method ppGetSignature = ppCls.getMethod("getSignature");
+        Method ppGetName = findAccessorMethod(ppCls, "getName", "name");
+        Method ppGetValue = findAccessorMethod(ppCls, "getValue", "value");
+        Method ppGetSignature = findAccessorMethod(ppCls, "getSignature", "signature");
         Method writeMethod = findWriteMethod(gpProps);
         if (writeMethod == null) return 0;
         int cnt = 0;
@@ -365,12 +372,12 @@ public class NMSHelper {
             Class<?> ppCls = Class.forName("com.destroystokyo.paper.profile.ProfileProperty");
             Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
             Constructor<?> propCtor = propCls.getConstructor(String.class, String.class, String.class);
-            Method ppGetName = ppCls.getMethod("getName");
-            Method ppGetValue = ppCls.getMethod("getValue");
-            Method ppGetSignature = ppCls.getMethod("getSignature");
-            Method mName = propCls.getMethod("getName");
-            Method mValue = propCls.getMethod("getValue");
-            Method mSignature = propCls.getMethod("getSignature");
+            Method ppGetName = findAccessorMethod(ppCls, "getName", "name");
+            Method ppGetValue = findAccessorMethod(ppCls, "getValue", "value");
+            Method ppGetSignature = findAccessorMethod(ppCls, "getSignature", "signature");
+            Method mName = findAccessorMethod(propCls, "getName", "name");
+            Method mValue = findAccessorMethod(propCls, "getValue", "value");
+            Method mSignature = findAccessorMethod(propCls, "getSignature", "signature");
             int cnt = 0;
             for (Object entry : entries) {
                 String pName, pValue, pSig;
