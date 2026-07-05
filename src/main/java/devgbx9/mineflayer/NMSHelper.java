@@ -243,10 +243,13 @@ public class NMSHelper {
                         .POST(HttpRequest.BodyPublishers.ofString(json))
                         .build();
                 } else {
+                    String skinUrl = "https://textures.minecraft.net/texture/1a4af718b55e85db84ca59814b9d3cd757aef7d6c1f8b46a4f9a1e7c73e0e4a";
+                    String json = "{\"url\":\"" + skinUrl + "\",\"visibility\":0}";
                     request = HttpRequest.newBuilder()
-                        .uri(URI.create("https://api.mineskin.org/v2/generate/random"))
+                        .uri(URI.create("https://api.mineskin.org/v2/generate/url"))
+                        .header("Content-Type", "application/json")
                         .header("Authorization", "Bearer " + MINESKIN_KEY)
-                        .POST(HttpRequest.BodyPublishers.noBody())
+                        .POST(HttpRequest.BodyPublishers.ofString(json))
                         .build();
                 }
                 HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -414,9 +417,12 @@ public class NMSHelper {
             }
             // Try to read properties from source
             Object[] entries = readPropsArray(fromProps);
-            if (entries == null || entries.length == 0) {
+            if (entries == null) {
                 logMethods(fromProps, "source props");
                 Bukkit.getLogger().warning("[Mineflayer] Skin: cannot iterate source " + fromProps.getClass().getName());
+                return false;
+            }
+            if (entries.length == 0) {
                 return false;
             }
             // Try to find a write method on target
