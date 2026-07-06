@@ -255,23 +255,31 @@ public class NMSHelper {
         return (Player) serverPlayer.getClass().getMethod("getBukkitEntity").invoke(serverPlayer);
     }
 
+    private static boolean defaultRandomPosWorks = true;
+    private static boolean defaultRandomPosLogged = false;
+
     public static Location findWanderPosition(Player bukkitPlayer, Object serverPlayer, int hRange, int vRange) {
-        try {
-            Class<?> cls = Class.forName("net.minecraft.world.entity.ai.util.DefaultRandomPos");
-            Class<?> leCls = Class.forName("net.minecraft.world.entity.LivingEntity");
-            Method getPos = cls.getMethod("getPos", leCls, int.class, int.class);
-            Object result = getPos.invoke(null, serverPlayer, hRange, vRange);
-            if (result != null) {
-                World world = bukkitPlayer.getWorld();
-                double x = vec3ReflectX(result);
-                double y = vec3ReflectY(result);
-                double z = vec3ReflectZ(result);
-                return new Location(world, x, y, z);
+        if (defaultRandomPosWorks) {
+            try {
+                Class<?> cls = Class.forName("net.minecraft.world.entity.ai.util.DefaultRandomPos");
+                Class<?> leCls = Class.forName("net.minecraft.world.entity.LivingEntity");
+                Method getPos = cls.getMethod("getPos", leCls, int.class, int.class);
+                Object result = getPos.invoke(null, serverPlayer, hRange, vRange);
+                if (result != null) {
+                    World world = bukkitPlayer.getWorld();
+                    double x = vec3ReflectX(result);
+                    double y = vec3ReflectY(result);
+                    double z = vec3ReflectZ(result);
+                    return new Location(world, x, y, z);
+                }
+            } catch (Exception e) {
+                if (!defaultRandomPosLogged) {
+                    Bukkit.getLogger().warning("[Mineflayer] DefaultRandomPos failed once, switching to Bukkit fallback: " + e.getMessage());
+                    defaultRandomPosLogged = true;
+                }
+                defaultRandomPosWorks = false;
             }
-        } catch (Exception e) {
-            Bukkit.getLogger().warning("[Mineflayer] DefaultRandomPos failed: " + e.getMessage());
         }
-        // Bukkit fallback
         return findWanderPositionBukkit(bukkitPlayer, hRange, vRange);
     }
 

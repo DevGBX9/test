@@ -233,9 +233,17 @@ public class BotNPC {
         }
     }
 
+    private int wanderFailCount = 0;
+
     private void wanderTick() {
         if (--wanderCooldown > 0 && wanderTarget != null) {
             moveTowardWanderTarget();
+            return;
+        }
+
+        if (wanderTarget == null && wanderFailCount > 2) {
+            // Backoff when wandering keeps failing: wait 2-4 seconds before retry
+            wanderCooldown = 40 + (int)(Math.random() * 40);
             return;
         }
 
@@ -243,9 +251,11 @@ public class BotNPC {
         wanderTarget = NMSHelper.findWanderPosition(bukkitPlayer, serverPlayer, 10, 7);
 
         if (wanderTarget != null) {
+            wanderFailCount = 0;
             // Random pause before moving: 0-30 ticks look around
             wanderCooldown = (int)(Math.random() * 30);
         } else {
+            wanderFailCount++;
             wanderCooldown = 10;
         }
     }
