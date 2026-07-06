@@ -53,7 +53,9 @@ public class BotNPC {
 
     public void setWandering(boolean w) {
         this.wandering = w;
-        if (!w) {
+        if (w) {
+            this.target = null;
+        } else {
             wanderTarget = null;
             wanderCooldown = 0;
         }
