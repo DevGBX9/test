@@ -152,15 +152,16 @@ public class BotNPC {
                 vy = 0;
             }
         }
-        // Auto-jump: on ground but hitting a wall
-        if (onGround && (wasMovingX && newX == oldX || wasMovingZ && newZ == oldZ)) {
-            vy = 0.42;
-            onGround = false;
-        }
         // Z axis
         if (wasMovingZ && collides(world, newX, newY, newZ)) {
             newZ = oldZ;
             vz = 0;
+        }
+        // Auto-jump: on ground but hitting a wall
+        if (onGround && ((wasMovingX && newX == oldX) || (wasMovingZ && newZ == oldZ))) {
+            vy = 0.42;
+            onGround = false;
+            newY = oldY + vy;
         }
 
         if (newY < world.getMinHeight()) {
@@ -238,11 +239,12 @@ public class BotNPC {
             return;
         }
 
+        // Pick a new wander target
         wanderTarget = NMSHelper.findWanderPosition(bukkitPlayer, serverPlayer, 10, 7);
 
         if (wanderTarget != null) {
-            wanderCooldown = 40 + (int)(Math.random() * 40);
-            moveTowardWanderTarget();
+            // Random pause before moving: 0-30 ticks look around
+            wanderCooldown = (int)(Math.random() * 30);
         } else {
             wanderCooldown = 10;
         }
@@ -262,11 +264,11 @@ public class BotNPC {
         }
 
         double dist = Math.sqrt(distSq);
-        double speed = 0.12;
+        double speed = 0.08 + Math.random() * 0.07;
 
         Vector vel = bukkitPlayer.getVelocity();
         vel.setX(dx / dist * speed);
-        vel.setY(0);
+        if (Math.abs(vel.getY()) < 0.01) vel.setY(0);
         vel.setZ(dz / dist * speed);
         bukkitPlayer.setVelocity(vel);
 
