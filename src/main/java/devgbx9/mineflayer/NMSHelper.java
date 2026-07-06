@@ -2,6 +2,7 @@ package devgbx9.mineflayer;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 
 import java.lang.reflect.Constructor;
@@ -254,26 +255,52 @@ public class NMSHelper {
         return (Player) serverPlayer.getClass().getMethod("getBukkitEntity").invoke(serverPlayer);
     }
 
-    public static Object findWanderPosition(Object serverPlayer, int hRange, int vRange) {
+    public static Location findWanderPosition(Player bukkitPlayer, Object serverPlayer, int hRange, int vRange) {
         try {
             Class<?> cls = Class.forName("net.minecraft.world.entity.ai.util.DefaultRandomPos");
             Class<?> leCls = Class.forName("net.minecraft.world.entity.LivingEntity");
             Method getPos = cls.getMethod("getPos", leCls, int.class, int.class);
-            return getPos.invoke(null, serverPlayer, hRange, vRange);
+            Object result = getPos.invoke(null, serverPlayer, hRange, vRange);
+            if (result != null) {
+                World world = bukkitPlayer.getWorld();
+                double x = vec3ReflectX(result);
+                double y = vec3ReflectY(result);
+                double z = vec3ReflectZ(result);
+                return new Location(world, x, y, z);
+            }
         } catch (Exception e) {
-            return null;
+            Bukkit.getLogger().warning("[Mineflayer] DefaultRandomPos failed: " + e.getMessage());
         }
+        // Bukkit fallback
+        return findWanderPositionBukkit(bukkitPlayer, hRange, vRange);
     }
 
-    public static double vec3X(Object nmsVec3) {
+    private static Location findWanderPositionBukkit(Player player, int hRange, int vRange) {
+        if (hRange < 2) hRange = 2;
+        Location loc = player.getLocation();
+        World world = loc.getWorld();
+        for (int i = 0; i < 15; i++) {
+            double angle = Math.random() * 2 * Math.PI;
+            double dist = 2 + Math.random() * (hRange - 2);
+            double nx = loc.getX() + Math.cos(angle) * dist;
+            double nz = loc.getZ() + Math.sin(angle) * dist;
+            int highest = world.getHighestBlockYAt((int) Math.floor(nx), (int) Math.floor(nz));
+            if (highest > world.getMinHeight()) {
+                return new Location(world, nx, highest + 1.0, nz);
+            }
+        }
+        return null;
+    }
+
+    private static double vec3ReflectX(Object nmsVec3) {
         try { return (double) nmsVec3.getClass().getMethod("x").invoke(nmsVec3); } catch (Exception e) { return 0; }
     }
 
-    public static double vec3Y(Object nmsVec3) {
+    private static double vec3ReflectY(Object nmsVec3) {
         try { return (double) nmsVec3.getClass().getMethod("y").invoke(nmsVec3); } catch (Exception e) { return 0; }
     }
 
-    public static double vec3Z(Object nmsVec3) {
+    private static double vec3ReflectZ(Object nmsVec3) {
         try { return (double) nmsVec3.getClass().getMethod("z").invoke(nmsVec3); } catch (Exception e) { return 0; }
     }
 

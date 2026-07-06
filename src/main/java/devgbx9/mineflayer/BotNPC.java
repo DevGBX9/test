@@ -17,7 +17,7 @@ public class BotNPC {
     private boolean alive;
     private Player target;
     private boolean wandering;
-    private Object wanderTarget;
+    private Location wanderTarget;
     private int wanderCooldown;
 
     public BotNPC(String name, UUID uuid) {
@@ -203,15 +203,11 @@ public class BotNPC {
 
     private void wanderTick() {
         if (--wanderCooldown > 0 && wanderTarget != null) {
-            // Continue moving toward current wander target
             moveTowardWanderTarget();
             return;
         }
 
-        // Pick a new wander target using the official game algorithm
-        if (serverPlayer != null) {
-            wanderTarget = NMSHelper.findWanderPosition(serverPlayer, 10, 7);
-        }
+        wanderTarget = NMSHelper.findWanderPosition(bukkitPlayer, serverPlayer, 10, 7);
 
         if (wanderTarget != null) {
             wanderCooldown = 40 + (int)(Math.random() * 40);
@@ -224,13 +220,9 @@ public class BotNPC {
     private void moveTowardWanderTarget() {
         if (wanderTarget == null) return;
 
-        double tx = NMSHelper.vec3X(wanderTarget);
-        double ty = NMSHelper.vec3Y(wanderTarget);
-        double tz = NMSHelper.vec3Z(wanderTarget);
-
         Location loc = bukkitPlayer.getLocation();
-        double dx = tx - loc.getX();
-        double dz = tz - loc.getZ();
+        double dx = wanderTarget.getX() - loc.getX();
+        double dz = wanderTarget.getZ() - loc.getZ();
         double distSq = dx * dx + dz * dz;
 
         if (distSq < 0.25) {
@@ -247,12 +239,7 @@ public class BotNPC {
         vel.setZ(dz / dist * speed);
         bukkitPlayer.setVelocity(vel);
 
-        // Face the wander target
-        Location targetLoc = loc.clone();
-        targetLoc.setX(tx);
-        targetLoc.setZ(tz);
-        targetLoc.setY(ty);
-        Vector dir = targetLoc.toVector().subtract(loc.toVector());
+        Vector dir = wanderTarget.toVector().subtract(loc.toVector());
         if (dir.lengthSquared() > 0) {
             loc.setDirection(dir);
             bukkitPlayer.setRotation(loc.getYaw(), loc.getPitch());
