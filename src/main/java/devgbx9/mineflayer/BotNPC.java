@@ -108,6 +108,7 @@ public class BotNPC {
             faceTarget();
         }
         if (wandering && target == null) {
+            lookAtNearbyPlayers();
             wanderTick();
         }
 
@@ -126,12 +127,15 @@ public class BotNPC {
         Location loc = bukkitPlayer.getLocation().clone();
         double oldX = loc.getX(), oldY = loc.getY(), oldZ = loc.getZ();
         World world = loc.getWorld();
+        boolean wasMovingX = Math.abs(vx) > 0.001;
+        boolean wasMovingZ = Math.abs(vz) > 0.001;
+
         double newX = oldX + vx;
         double newY = oldY + vy;
         double newZ = oldZ + vz;
 
         // X axis
-        if (Math.abs(vx) > 0.001 && collides(world, newX, oldY, oldZ)) {
+        if (wasMovingX && collides(world, newX, oldY, oldZ)) {
             newX = oldX;
             vx = 0;
         }
@@ -148,8 +152,13 @@ public class BotNPC {
                 vy = 0;
             }
         }
+        // Auto-jump: on ground but hitting a wall
+        if (onGround && (wasMovingX && newX == oldX || wasMovingZ && newZ == oldZ)) {
+            vy = 0.42;
+            onGround = false;
+        }
         // Z axis
-        if (Math.abs(vz) > 0.001 && collides(world, newX, newY, newZ)) {
+        if (wasMovingZ && collides(world, newX, newY, newZ)) {
             newZ = oldZ;
             vz = 0;
         }
@@ -201,6 +210,26 @@ public class BotNPC {
         Vector dir = target.getEyeLocation().toVector().subtract(eyeLoc.toVector());
         botLoc.setDirection(dir);
         bukkitPlayer.setRotation(botLoc.getYaw(), botLoc.getPitch());
+    }
+
+    private void lookAtNearbyPlayers() {
+        Location botLoc = bukkitPlayer.getLocation();
+        Player nearest = null;
+        double nearestDist = 64;
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            if (p.equals(bukkitPlayer) || !p.getWorld().equals(bukkitPlayer.getWorld())) continue;
+            double dist = p.getLocation().distanceSquared(botLoc);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearest = p;
+            }
+        }
+        if (nearest != null) {
+            Location dirLoc = botLoc.clone();
+            Vector dir = nearest.getEyeLocation().toVector().subtract(dirLoc.toVector());
+            dirLoc.setDirection(dir);
+            bukkitPlayer.setRotation(dirLoc.getYaw(), dirLoc.getPitch());
+        }
     }
 
     private void wanderTick() {
