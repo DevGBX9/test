@@ -3,6 +3,7 @@ package devgbx9.mineflayer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
 
 import java.util.UUID;
 
@@ -68,5 +69,13 @@ public class BotNPC {
         serverPlayer = null;
         bukkitPlayer = null;
         alive = false;
+    }
+
+    public void tick() {
+        if (!alive || bukkitPlayer == null || !bukkitPlayer.isOnline()) return;
+
+        Vector vel = bukkitPlayer.getVelocity();
+        vel.setY(vel.getY() - 0.08);
+        bukkitPlayer.setVelocity(vel);
     }
 }
