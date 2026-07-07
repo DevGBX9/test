@@ -39,6 +39,11 @@ public class NMSHelper {
     private static Method entityManagerAdd;
     private static Object entityManager;
 
+    private static Method sendPacketMethod;
+    private static Constructor<?> playerInfoPacketCtor;
+    private static Constructor<?> addPlayerPacketCtor;
+    private static Object playerInfoActionAdd;
+
     private static Object packetFlowServerbound;
     private static Constructor<?> connectionConstructor;
     private static Field connectionAddressField;
@@ -159,6 +164,45 @@ public class NMSHelper {
             gamePacketListenerConstructor = findConstructor(listenerCls, 4);
             serverPlayerConnectionField = findFieldByType(serverPlayerCls, "ServerGamePacketListenerImpl");
 
+            // Find packet classes for bot visibility broadcasting
+            try {
+                Class<?> infoPacketCls = Class.forName("net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket");
+                for (Constructor<?> c : infoPacketCls.getDeclaredConstructors()) {
+                    if (c.getParameterCount() == 2) {
+                        Class<?>[] pt = c.getParameterTypes();
+                        if (pt[0].isEnum()) {
+                            playerInfoPacketCtor = c;
+                            for (Object enumVal : pt[0].getEnumConstants()) {
+                                if (enumVal.toString().equals("ADD_PLAYER") || enumVal.name().equals("ADD_PLAYER")) {
+                                    playerInfoActionAdd = enumVal;
+                                    break;
+                                }
+                            }
+                            if (playerInfoActionAdd == null) playerInfoActionAdd = pt[0].getEnumConstants()[0];
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+            try {
+                Class<?> addPlayerCls = Class.forName("net.minecraft.network.protocol.game.ClientboundAddPlayerPacket");
+                for (Constructor<?> c : addPlayerCls.getDeclaredConstructors()) {
+                    if (c.getParameterCount() == 1) {
+                        addPlayerPacketCtor = c;
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {}
+            try {
+                Class<?> listenerCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
+                for (Method m : listenerCls.getMethods()) {
+                    if ("send".equals(m.getName()) && m.getParameterCount() == 1) {
+                        sendPacketMethod = m;
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {}
+
             Class<?> playerListCls = Class.forName("net.minecraft.server.players.PlayerList");
         playerListPlaceNewPlayer = findMethod(playerListCls, "placeNewPlayer", 3);
         if (playerListPlaceNewPlayer == null) playerListPlaceNewPlayer = findMethod(playerListCls, "addPlayer", 2);
@@ -254,17 +298,24 @@ public class NMSHelper {
                 byUUID.put(uuid, serverPlayer);
             }
 
-            // Now try to add entity to level (tracker + ticking)
-            boolean addedToLevel = false;
-            if (serverLevelAddPlayer != null) {
-                try {
-                    serverLevelAddPlayer.invoke(serverLevel, serverPlayer);
-                    addedToLevel = true;
-                } catch (Exception ignored) {}
-            }
+            // Try to add entity to level (tracker + ticking) - may fail if chunk not loaded
+            addEntityToLevel(serverLevel, serverPlayer, uuid);
+        }
 
-            if (!addedToLevel && entityManagerAdd != null) {
-                try {
+        return serverPlayer;
+    }
+
+    public static void addEntityToLevel(Object serverLevel, Object serverPlayer, UUID uuid) {
+        boolean addedToLevel = false;
+        if (serverLevelAddPlayer != null) {
+            try {
+                serverLevelAddPlayer.invoke(serverLevel, serverPlayer);
+                addedToLevel = true;
+            } catch (Exception ignored) {}
+        }
+
+        if (!addedToLevel && entityManagerAdd != null) {
+            try {
                 Field emf = serverLevel.getClass().getDeclaredField("entityManager");
                 emf.setAccessible(true);
                 Object em = emf.get(serverLevel);
@@ -273,27 +324,75 @@ public class NMSHelper {
             } catch (Exception ignored) {}
         }
 
-            if (!addedToLevel) {
-                // Fallback: directly register entity in the world's internal maps for ticking
-                if (levelEntityByUuid != null) {
-                    try {
-                        @SuppressWarnings("unchecked")
-                        Map<UUID, Object> map = (Map<UUID, Object>) levelEntityByUuid.get(serverLevel);
-                        map.put(uuid, serverPlayer);
-                    } catch (Exception ignored) {}
-                }
-                if (levelEntitiesById != null) {
-                    try {
-                        Object entityId = serverPlayer.getClass().getMethod("getId").invoke(serverPlayer);
-                        @SuppressWarnings("unchecked")
-                        Map<Integer, Object> map = (Map<Integer, Object>) levelEntitiesById.get(serverLevel);
-                        map.put((Integer) entityId, serverPlayer);
-                    } catch (Exception ignored) {}
-                }
+        if (!addedToLevel) {
+            // Fallback: directly register entity in the world's internal maps for ticking
+            if (levelEntityByUuid != null) {
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<UUID, Object> map = (Map<UUID, Object>) levelEntityByUuid.get(serverLevel);
+                    map.put(uuid, serverPlayer);
+                } catch (Exception ignored) {}
+            }
+            if (levelEntitiesById != null) {
+                try {
+                    Object entityId = serverPlayer.getClass().getMethod("getId").invoke(serverPlayer);
+                    @SuppressWarnings("unchecked")
+                    Map<Integer, Object> map = (Map<Integer, Object>) levelEntitiesById.get(serverLevel);
+                    map.put((Integer) entityId, serverPlayer);
+                } catch (Exception ignored) {}
             }
         }
+    }
 
-        return serverPlayer;
+    public static void registerEntityInWorld(Object serverPlayer, org.bukkit.World world) {
+        try {
+            Object serverLevel = craftWorldGetHandle.invoke(world);
+            UUID uuid = (UUID) serverPlayer.getClass().getMethod("getUUID").invoke(serverPlayer);
+            addEntityToLevel(serverLevel, serverPlayer, uuid);
+        } catch (Exception ignored) {}
+    }
+
+    public static void broadcastBotSpawn(Object serverPlayer) {
+        if (serverPlayer == null) return;
+        if (sendPacketMethod == null) return;
+        try {
+            // Create player info packet (adds to tab list)
+            Object infoPacket = null;
+            if (playerInfoPacketCtor != null && playerInfoActionAdd != null) {
+                Object actionSet = java.util.EnumSet.of((Enum) playerInfoActionAdd);
+                infoPacket = playerInfoPacketCtor.newInstance(actionSet, java.util.Collections.singletonList(serverPlayer));
+            }
+
+            // Create spawn player packet
+            Object spawnPacket = null;
+            if (addPlayerPacketCtor != null) {
+                spawnPacket = addPlayerPacketCtor.newInstance(serverPlayer);
+            }
+
+            // Send to all online players
+            Object nmsServer = craftServerGetServer.invoke(Bukkit.getServer());
+            Object playerList = minecraftServerGetPlayerList.invoke(nmsServer);
+            if (playerListPlayersField != null) {
+                @SuppressWarnings("unchecked")
+                List<Object> allPlayers = (List<Object>) playerListPlayersField.get(playerList);
+                for (Object viewer : allPlayers) {
+                    if (viewer == serverPlayer) continue;
+                    Object conn = serverPlayerConnectionField.get(viewer);
+                    if (conn != null) {
+                        if (infoPacket != null) sendPacketMethod.invoke(conn, infoPacket);
+                        if (spawnPacket != null) sendPacketMethod.invoke(conn, spawnPacket);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public static void nativeKnockback(Object serverPlayer, double strength, double x, double z) {
+        try {
+            Class<?> livingCls = Class.forName("net.minecraft.world.entity.LivingEntity");
+            Method knockback = livingCls.getMethod("knockback", double.class, double.class, double.class);
+            knockback.invoke(serverPlayer, strength, x, z);
+        } catch (Exception ignored) {}
     }
 
     public static void broadcastJoinMessage(String name) {

@@ -3,8 +3,8 @@ package devgbx9.mineflayer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
-import org.bukkit.util.Vector;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.UUID;
 
@@ -16,75 +16,63 @@ public class BotNPC {
     private Player bukkitPlayer;
     private boolean alive;
 
-    private Method getDeltaMovement;
-    private Method setDeltaMovement;
-    private Method moveMethod;
-    private Method knockbackMethod;
-    private Class<?> vec3Class;
-    private Object moverTypeSelf;
+    private Method serverPlayerTick;
+    private Method getX, getY, getZ;
+    private Field connectionField;
 
     public BotNPC(String name, UUID uuid) {
         this.name = name;
         this.uuid = uuid;
     }
 
-    public String getName() {
-        return name;
-    }
-
-    public UUID getUuid() {
-        return uuid;
-    }
-
-    public boolean isAlive() {
-        return alive;
-    }
-
-    public Player getBukkitPlayer() {
-        return bukkitPlayer;
-    }
+    public String getName() { return name; }
+    public UUID getUuid() { return uuid; }
+    public boolean isAlive() { return alive; }
+    public Player getBukkitPlayer() { return bukkitPlayer; }
 
     public void spawn(Location location) {
         if (alive) return;
-
-        if (NMSHelper.isAvailable()) {
-            try {
-                serverPlayer = NMSHelper.createAndJoinFakePlayer(name, uuid, location);
-                bukkitPlayer = NMSHelper.toBukkitPlayer(serverPlayer);
-                bukkitPlayer.teleport(location);
-                initNMS();
-                NMSHelper.broadcastJoinMessage(name);
-                Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' spawned at " + location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ());
-                alive = true;
-                return;
-            } catch (Exception e) {
-                Bukkit.getLogger().warning("[Mineflayer] spawn failed: " + e.getMessage());
-            }
+        if (!NMSHelper.isAvailable()) {
+            Bukkit.getLogger().severe("[Mineflayer] Cannot spawn bot - NMS unavailable");
+            return;
         }
-
-        Bukkit.getLogger().severe("[Mineflayer] Cannot spawn bot - NMS unavailable");
-    }
-
-    private void initNMS() {
         try {
+            serverPlayer = NMSHelper.createAndJoinFakePlayer(name, uuid, location);
+            bukkitPlayer = NMSHelper.toBukkitPlayer(serverPlayer);
+            bukkitPlayer.teleport(location);
+
+            // Retry world registration after teleport (chunk now loaded)
+            NMSHelper.registerEntityInWorld(serverPlayer, location.getWorld());
+            // Broadcast bot to all online players for visibility
+            NMSHelper.broadcastBotSpawn(serverPlayer);
+
             Class<?> entityCls = Class.forName("net.minecraft.world.entity.Entity");
-            vec3Class = Class.forName("net.minecraft.world.phys.Vec3");
-            Class<?> moverCls = Class.forName("net.minecraft.world.entity.MoverType");
-            getDeltaMovement = entityCls.getMethod("getDeltaMovement");
-            setDeltaMovement = entityCls.getMethod("setDeltaMovement", vec3Class);
-            moveMethod = entityCls.getMethod("move", moverCls, vec3Class);
-            Class<?> livingCls = Class.forName("net.minecraft.world.entity.LivingEntity");
-            knockbackMethod = livingCls.getMethod("knockback", double.class, double.class, double.class);
-            for (Object c : moverCls.getEnumConstants()) {
-                if (c.toString().equals("SELF")) { moverTypeSelf = c; break; }
+            serverPlayerTick = entityCls.getMethod("tick");
+            getX = entityCls.getMethod("getX");
+            getY = entityCls.getMethod("getY");
+            getZ = entityCls.getMethod("getZ");
+
+            connectionField = null;
+            for (Field f : serverPlayer.getClass().getDeclaredFields()) {
+                Class<?> listenerCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
+                if (f.getType().isAssignableFrom(listenerCls)) {
+                    f.setAccessible(true);
+                    connectionField = f;
+                    break;
+                }
             }
-            if (moverTypeSelf == null) moverTypeSelf = moverCls.getEnumConstants()[0];
-        } catch (Exception ignored) {}
+
+            NMSHelper.broadcastJoinMessage(name);
+            Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' spawned at "
+                + location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ());
+            alive = true;
+        } catch (Exception e) {
+            Bukkit.getLogger().warning("[Mineflayer] spawn failed: " + e.getMessage());
+        }
     }
 
     public void remove() {
         if (!alive) return;
-
         if (bukkitPlayer != null) {
             try { bukkitPlayer.kickPlayer("Bot removed"); } catch (Exception ignored) {}
         }
@@ -98,35 +86,60 @@ public class BotNPC {
     }
 
     public void nativeKnockback(double strength, double x, double z) {
-        if (!alive || serverPlayer == null || knockbackMethod == null) return;
-        try {
-            knockbackMethod.invoke(serverPlayer, strength, x, z);
-        } catch (Exception ignored) {}
+        if (!alive || serverPlayer == null) return;
+        NMSHelper.nativeKnockback(serverPlayer, strength, x, z);
     }
 
     public void tick() {
-        if (!alive || serverPlayer == null || getDeltaMovement == null) return;
+        if (!alive || serverPlayer == null) return;
         try {
-            Object delta = getDeltaMovement.invoke(serverPlayer);
-            double dx = (double) delta.getClass().getMethod("x").invoke(delta);
-            double dy = (double) delta.getClass().getMethod("y").invoke(delta);
-            double dz = (double) delta.getClass().getMethod("z").invoke(delta);
+            // Call native ServerPlayer.tick() which handles:
+            // gravity, collision, friction, knockback, potion effects
+            serverPlayerTick.invoke(serverPlayer);
 
-            dy -= 0.08;
+            // Prevent connection timeout disconnect
+            if (connectionField != null) {
+                Object listener = connectionField.get(serverPlayer);
+                if (listener != null) {
+                    // Navigate: ServerGamePacketListenerImpl -> Connection
+                    try {
+                        Field rawConnField = null;
+                        for (Class<?> cls = listener.getClass(); cls != null; cls = cls.getSuperclass()) {
+                            try {
+                                rawConnField = cls.getDeclaredField("connection");
+                                break;
+                            } catch (NoSuchFieldException ignored) {}
+                        }
+                        if (rawConnField == null) throw new NoSuchFieldException("connection");
+                        rawConnField.setAccessible(true);
+                        Object rawConn = rawConnField.get(listener);
+                        if (rawConn != null) {
+                            for (Class<?> cls = rawConn.getClass(); cls != null; cls = cls.getSuperclass()) {
+                                try {
+                                    Field f = cls.getDeclaredField("lastReceivedTime");
+                                    f.setAccessible(true);
+                                    f.setLong(rawConn, System.currentTimeMillis());
+                                } catch (NoSuchFieldException ignored) {}
+                                try {
+                                    Field f = cls.getDeclaredField("tickCount");
+                                    f.setAccessible(true);
+                                    f.setInt(rawConn, 0);
+                                } catch (NoSuchFieldException ignored) {}
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
 
-            Object newDelta = vec3Class.getConstructor(double.class, double.class, double.class)
-                .newInstance(dx, dy, dz);
-            setDeltaMovement.invoke(serverPlayer, newDelta);
-
-            moveMethod.invoke(serverPlayer, moverTypeSelf, newDelta);
-
+            // Sync position back to Bukkit player after native movement
             if (bukkitPlayer != null && bukkitPlayer.isOnline()) {
-                bukkitPlayer.teleport(bukkitPlayer.getLocation());
-                Object resultDelta = getDeltaMovement.invoke(serverPlayer);
-                double rdx = (double) resultDelta.getClass().getMethod("x").invoke(resultDelta);
-                double rdy = (double) resultDelta.getClass().getMethod("y").invoke(resultDelta);
-                double rdz = (double) resultDelta.getClass().getMethod("z").invoke(resultDelta);
-                bukkitPlayer.setVelocity(new Vector(rdx, rdy, rdz));
+                double nx = (double) getX.invoke(serverPlayer);
+                double ny = (double) getY.invoke(serverPlayer);
+                double nz = (double) getZ.invoke(serverPlayer);
+                Location loc = bukkitPlayer.getLocation();
+                if (loc.getX() != nx || loc.getY() != ny || loc.getZ() != nz) {
+                    bukkitPlayer.teleport(new Location(bukkitPlayer.getWorld(), nx, ny, nz, loc.getYaw(), loc.getPitch()));
+                }
             }
         } catch (Exception ignored) {}
     }
