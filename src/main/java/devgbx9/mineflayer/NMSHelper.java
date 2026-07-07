@@ -173,7 +173,7 @@ public class NMSHelper {
                         if (pt[0].isEnum()) {
                             playerInfoPacketCtor = c;
                             for (Object enumVal : pt[0].getEnumConstants()) {
-                                if (enumVal.toString().equals("ADD_PLAYER") || enumVal.name().equals("ADD_PLAYER")) {
+                                if (enumVal.toString().equals("ADD_PLAYER")) {
                                     playerInfoActionAdd = enumVal;
                                     break;
                                 }
@@ -194,8 +194,8 @@ public class NMSHelper {
                 }
             } catch (Exception ignored) {}
             try {
-                Class<?> listenerCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
-                for (Method m : listenerCls.getMethods()) {
+                Class<?> sendListenerCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
+                for (Method m : sendListenerCls.getMethods()) {
                     if ("send".equals(m.getName()) && m.getParameterCount() == 1) {
                         sendPacketMethod = m;
                         break;
