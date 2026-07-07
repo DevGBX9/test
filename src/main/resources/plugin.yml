@@ -7,7 +7,7 @@ author: DevGBX9
 commands:
   mineflayer:
     description: Mineflayer plugin commands
-    usage: /<command> test
+    usage: /<command> add <name> | /<command> delete <name>
     permission: mineflayer.use
 
 permissions:

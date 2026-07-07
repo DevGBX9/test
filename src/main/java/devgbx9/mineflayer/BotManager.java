@@ -3,18 +3,15 @@ package devgbx9.mineflayer;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 public class BotManager {
 
     private final Map<String, BotNPC> bots = new HashMap<>();
 
-    public BotNPC createBot(String name, Location location, Player source) {
+    public BotNPC createBot(String name, Location location) {
         BotNPC bot = new BotNPC(name, UUID.randomUUID());
-        bot.spawn(location, source);
+        bot.spawn(location);
         bots.put(name.toLowerCase(), bot);
         return bot;
     }
@@ -28,19 +25,28 @@ public class BotManager {
         return false;
     }
 
-    public boolean exists(String name) {
-        return bots.containsKey(name.toLowerCase());
+    public void removeAll() {
+        for (BotNPC bot : bots.values()) {
+            bot.remove();
+        }
+        bots.clear();
     }
 
     public BotNPC getBot(String name) {
         return bots.get(name.toLowerCase());
     }
 
-    public void removeAll() {
+    public BotNPC getBotByPlayer(Player player) {
         for (BotNPC bot : bots.values()) {
-            bot.remove();
+            if (bot.isAlive() && bot.getBukkitPlayer() != null && bot.getBukkitPlayer().equals(player)) {
+                return bot;
+            }
         }
-        bots.clear();
+        return null;
+    }
+
+    public boolean exists(String name) {
+        return bots.containsKey(name.toLowerCase());
     }
 
     public List<String> getBotNames() {
