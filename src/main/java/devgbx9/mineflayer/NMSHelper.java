@@ -7,7 +7,6 @@ import org.bukkit.entity.Player;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -23,26 +22,15 @@ public class NMSHelper {
     private static Method minecraftServerGetPlayerList;
 
     private static Constructor<?> serverPlayerConstructor;
-    private static Field serverPlayerConnectionField;
     private static Method serverLevelAddPlayer;
 
     private static Method clientInformationCreateDefault;
     private static Constructor<?> gameProfileConstructor;
 
-    private static Object packetFlowServerbound;
-    private static Constructor<?> connectionConstructor;
-    private static Field connectionAddressField;
-    private static Field connectionChannelField;
-    private static Object unsafe;
-
-    private static Method playerListPlaceNewPlayer;
     private static Method playerListRemove;
     private static Field playerListPlayersField;
     private static Field playerListByNameField;
     private static Field playerListByUUIDField;
-
-    private static Constructor<?> gamePacketListenerConstructor;
-    private static Method cookieCreateInitial;
 
     private static Field levelEntityByUuid;
     private static Field levelEntitiesById;
@@ -108,30 +96,12 @@ public class NMSHelper {
             Class<?> gpClass = Class.forName("com.mojang.authlib.GameProfile");
             gameProfileConstructor = gpClass.getConstructor(UUID.class, String.class);
 
-            Class<?> packetFlowCls = resolveClass("net.minecraft.network.PacketFlow", "net.minecraft.network.protocol.PacketFlow");
-            if (packetFlowCls != null) {
-                packetFlowServerbound = findEnumConstant(packetFlowCls, "SERVERBOUND");
-            }
-
-            Class<?> connectionCls = Class.forName("net.minecraft.network.Connection");
-            connectionConstructor = findCompatibleConstructor(connectionCls, packetFlowCls);
-            connectionAddressField = getAccessibleField(connectionCls, "address");
-            connectionChannelField = getAccessibleField(connectionCls, "channel");
-            setupUnsafe();
-
             Class<?> playerListCls = Class.forName("net.minecraft.server.players.PlayerList");
-            playerListPlaceNewPlayer = findMethod(playerListCls, "placeNewPlayer", 3);
             playerListRemove = findMethod(playerListCls, "remove", 1);
             playerListPlayersField = getAccessibleField(playerListCls, "players");
             if (playerListPlayersField == null) playerListPlayersField = findListField(playerListCls);
             playerListByNameField = getAccessibleField(playerListCls, "playersByName");
             playerListByUUIDField = getAccessibleField(playerListCls, "playersByUUID");
-
-            Class<?> listenerCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
-            Class<?> cookieCls = Class.forName("net.minecraft.server.network.CommonListenerCookie");
-            cookieCreateInitial = findMethod(cookieCls, "createInitial", 2);
-            gamePacketListenerConstructor = findConstructor(listenerCls, 4);
-            serverPlayerConnectionField = findFieldByType(serverPlayerCls, "ServerGamePacketListenerImpl");
 
             initialized = true;
             Bukkit.getLogger().info("[Mineflayer] NMS ready");
@@ -148,41 +118,7 @@ public class NMSHelper {
         Object clientInfo = clientInformationCreateDefault.invoke(null);
         Object serverPlayer = serverPlayerConstructor.newInstance(nmsServer, serverLevel, profile, clientInfo);
 
-        Object conn = createConnection();
-        Object cookie = null;
-        if (cookieCreateInitial != null) {
-            cookie = cookieCreateInitial.invoke(null, profile, false);
-        }
-
-        if (conn != null && serverPlayerConnectionField != null && gamePacketListenerConstructor != null && cookie != null) {
-            try {
-                Object listener = gamePacketListenerConstructor.newInstance(nmsServer, conn, serverPlayer, cookie);
-                serverPlayerConnectionField.set(serverPlayer, listener);
-                Class<?> connectionCls = Class.forName("net.minecraft.network.Connection");
-                String[] configMethods = {"configureSerializationAfterHandshake", "setupSerialization", "configureSerialization", "initSerialization"};
-                Method cfgMethod = null;
-                for (String mn : configMethods) {
-                    try {
-                        cfgMethod = connectionCls.getMethod(mn, listener.getClass());
-                        break;
-                    } catch (NoSuchMethodException ignored) {}
-                }
-                if (cfgMethod != null) {
-                    try {
-                        cfgMethod.invoke(conn, listener);
-                    } catch (Exception ignored) {}
-                }
-            } catch (Exception ignored) {}
-        }
-
         Object playerList = minecraftServerGetPlayerList.invoke(nmsServer);
-
-        if (playerListPlaceNewPlayer != null && conn != null && cookie != null) {
-            try {
-                playerListPlaceNewPlayer.invoke(playerList, conn, serverPlayer, cookie);
-                return serverPlayer;
-            } catch (Exception ignored) {}
-        }
 
         if (playerListPlayersField != null) {
             @SuppressWarnings("unchecked")
@@ -258,73 +194,11 @@ public class NMSHelper {
         return (Player) serverPlayer.getClass().getMethod("getBukkitEntity").invoke(serverPlayer);
     }
 
-    private static Object createConnection() {
-        if (packetFlowServerbound == null) return null;
-        if (connectionConstructor != null) {
-            try {
-                Object conn = connectionConstructor.newInstance(packetFlowServerbound);
-                fillConnectionFields(conn);
-                return conn;
-            } catch (Exception ignored) {}
-        }
-        if (unsafe != null) {
-            try {
-                Method alloc = unsafe.getClass().getMethod("allocateInstance", Class.class);
-                Object conn = alloc.invoke(unsafe, connectionCls());
-                for (Field f : conn.getClass().getDeclaredFields()) {
-                    if (f.getType().isEnum() && f.getType().getName().contains("PacketFlow")) {
-                        f.setAccessible(true);
-                        f.set(conn, packetFlowServerbound);
-                        break;
-                    }
-                }
-                fillConnectionFields(conn);
-                return conn;
-            } catch (Exception ignored) {}
-        }
-        return null;
-    }
-
-    private static void fillConnectionFields(Object conn) {
-        if (connectionAddressField != null) {
-            try { connectionAddressField.set(conn, new InetSocketAddress("127.0.0.1", 0)); } catch (Exception ignored) {}
-        }
-        if (connectionChannelField != null) {
-            try {
-                Class<?> ecCls = Class.forName("io.netty.channel.embedded.EmbeddedChannel");
-                Object ec = ecCls.getDeclaredConstructor().newInstance();
-                connectionChannelField.set(conn, ec);
-            } catch (Exception ignored) {
-                try { connectionChannelField.set(conn, null); } catch (Exception ignored2) {}
-            }
-        }
-    }
-
-    private static void setupUnsafe() {
-        try {
-            Class<?> u = Class.forName("sun.misc.Unsafe");
-            Field f = u.getDeclaredField("theUnsafe");
-            f.setAccessible(true);
-            unsafe = f.get(null);
-        } catch (Exception ignored) {}
-    }
-
-    private static Class<?> connectionCls() {
-        try { return Class.forName("net.minecraft.network.Connection"); } catch (Exception e) { return null; }
-    }
-
     private static Class<?> resolveClass(String... names) {
         for (String n : names) {
             try { return Class.forName(n); } catch (ClassNotFoundException ignored) {}
         }
         return null;
-    }
-
-    private static Object findEnumConstant(Class<?> cls, String name) throws Exception {
-        for (Object c : cls.getEnumConstants()) {
-            if (c.toString().equals(name)) return c;
-        }
-        return cls.getEnumConstants()[0];
     }
 
     private static Field getAccessibleField(Class<?> cls, String name) {
@@ -344,22 +218,6 @@ public class NMSHelper {
     private static Constructor<?> findConstructor(Class<?> cls, int paramCount) {
         for (Constructor<?> c : cls.getDeclaredConstructors()) {
             if (c.getParameterCount() == paramCount) { c.setAccessible(true); return c; }
-        }
-        return null;
-    }
-
-    private static Constructor<?> findCompatibleConstructor(Class<?> cls, Class<?> first) {
-        if (first == null) return null;
-        for (Constructor<?> c : cls.getDeclaredConstructors()) {
-            Class<?>[] p = c.getParameterTypes();
-            if (p.length >= 1 && p[0].isAssignableFrom(first)) { c.setAccessible(true); return c; }
-        }
-        return null;
-    }
-
-    private static Field findFieldByType(Class<?> cls, String simple) {
-        for (Field f : cls.getDeclaredFields()) {
-            if (f.getType().getSimpleName().equals(simple)) { f.setAccessible(true); return f; }
         }
         return null;
     }
