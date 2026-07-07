@@ -28,6 +28,7 @@ public class NMSHelper {
     private static Method clientInformationCreateDefault;
     private static Constructor<?> gameProfileConstructor;
 
+    private static Method playerListPlaceNewPlayer;
     private static Method playerListRemove;
     private static Field playerListPlayersField;
     private static Field playerListByNameField;
@@ -159,7 +160,10 @@ public class NMSHelper {
             serverPlayerConnectionField = findFieldByType(serverPlayerCls, "ServerGamePacketListenerImpl");
 
             Class<?> playerListCls = Class.forName("net.minecraft.server.players.PlayerList");
-            playerListRemove = findMethod(playerListCls, "remove", 1);
+        playerListPlaceNewPlayer = findMethod(playerListCls, "placeNewPlayer", 3);
+        if (playerListPlaceNewPlayer == null) playerListPlaceNewPlayer = findMethod(playerListCls, "addPlayer", 2);
+        if (playerListPlaceNewPlayer == null) playerListPlaceNewPlayer = findMethod(playerListCls, "add", 1);
+        playerListRemove = findMethod(playerListCls, "remove", 1);
             playerListPlayersField = getAccessibleField(playerListCls, "players");
             if (playerListPlayersField == null) playerListPlayersField = findListField(playerListCls);
             playerListByNameField = getAccessibleField(playerListCls, "playersByName");
@@ -200,41 +204,67 @@ public class NMSHelper {
         if (cookieCreateInitial != null) {
             try { cookie = cookieCreateInitial.invoke(null, profile, false); } catch (Exception ignored) {}
         }
+        Object listener = null;
         if (conn != null && serverPlayerConnectionField != null && gamePacketListenerConstructor != null && cookie != null) {
             try {
-                Object listener = gamePacketListenerConstructor.newInstance(nmsServer, conn, serverPlayer, cookie);
+                listener = gamePacketListenerConstructor.newInstance(nmsServer, conn, serverPlayer, cookie);
                 serverPlayerConnectionField.set(serverPlayer, listener);
             } catch (Exception ignored) {}
         }
 
         Object playerList = minecraftServerGetPlayerList.invoke(nmsServer);
 
-        if (playerListPlayersField != null) {
-            @SuppressWarnings("unchecked")
-            List<Object> players = (List<Object>) playerListPlayersField.get(playerList);
-            players.add(serverPlayer);
-        }
-        if (playerListByNameField != null) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> byName = (Map<String, Object>) playerListByNameField.get(playerList);
-            byName.put(name.toLowerCase(java.util.Locale.ENGLISH), serverPlayer);
-        }
-        if (playerListByUUIDField != null) {
-            @SuppressWarnings("unchecked")
-            Map<UUID, Object> byUUID = (Map<UUID, Object>) playerListByUUIDField.get(playerList);
-            byUUID.put(uuid, serverPlayer);
-        }
-
-        boolean addedToLevel = false;
-        if (serverLevelAddPlayer != null) {
+        // Try PlayerList registration methods (handles all registration including tracker + visibility)
+        boolean placedNormally = false;
+        if (playerListPlaceNewPlayer != null) {
             try {
-                serverLevelAddPlayer.invoke(serverLevel, serverPlayer);
-                addedToLevel = true;
+                int pc = playerListPlaceNewPlayer.getParameterCount();
+                Object[] args;
+                if (pc == 3 && listener != null && cookie != null) {
+                    args = new Object[]{listener, serverPlayer, cookie};
+                } else if (pc == 2) {
+                    args = new Object[]{serverPlayer, cookie};
+                } else if (pc == 1) {
+                    args = new Object[]{serverPlayer};
+                } else {
+                    args = null;
+                }
+                if (args != null) {
+                    playerListPlaceNewPlayer.invoke(playerList, args);
+                    placedNormally = true;
+                }
             } catch (Exception ignored) {}
         }
 
-        if (!addedToLevel && entityManagerAdd != null) {
-            try {
+        if (!placedNormally) {
+            // Manual PlayerList registration fallback
+            if (playerListPlayersField != null) {
+                @SuppressWarnings("unchecked")
+                List<Object> players = (List<Object>) playerListPlayersField.get(playerList);
+                players.add(serverPlayer);
+            }
+            if (playerListByNameField != null) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> byName = (Map<String, Object>) playerListByNameField.get(playerList);
+                byName.put(name.toLowerCase(java.util.Locale.ENGLISH), serverPlayer);
+            }
+            if (playerListByUUIDField != null) {
+                @SuppressWarnings("unchecked")
+                Map<UUID, Object> byUUID = (Map<UUID, Object>) playerListByUUIDField.get(playerList);
+                byUUID.put(uuid, serverPlayer);
+            }
+
+            // Now try to add entity to level (tracker + ticking)
+            boolean addedToLevel = false;
+            if (serverLevelAddPlayer != null) {
+                try {
+                    serverLevelAddPlayer.invoke(serverLevel, serverPlayer);
+                    addedToLevel = true;
+                } catch (Exception ignored) {}
+            }
+
+            if (!addedToLevel && entityManagerAdd != null) {
+                try {
                 Field emf = serverLevel.getClass().getDeclaredField("entityManager");
                 emf.setAccessible(true);
                 Object em = emf.get(serverLevel);
@@ -243,22 +273,23 @@ public class NMSHelper {
             } catch (Exception ignored) {}
         }
 
-        if (!addedToLevel) {
-            // Fallback: directly register entity in the world's internal maps for ticking
-            if (levelEntityByUuid != null) {
-                try {
-                    @SuppressWarnings("unchecked")
-                    Map<UUID, Object> map = (Map<UUID, Object>) levelEntityByUuid.get(serverLevel);
-                    map.put(uuid, serverPlayer);
-                } catch (Exception ignored) {}
-            }
-            if (levelEntitiesById != null) {
-                try {
-                    Object entityId = serverPlayer.getClass().getMethod("getId").invoke(serverPlayer);
-                    @SuppressWarnings("unchecked")
-                    Map<Integer, Object> map = (Map<Integer, Object>) levelEntitiesById.get(serverLevel);
-                    map.put((Integer) entityId, serverPlayer);
-                } catch (Exception ignored) {}
+            if (!addedToLevel) {
+                // Fallback: directly register entity in the world's internal maps for ticking
+                if (levelEntityByUuid != null) {
+                    try {
+                        @SuppressWarnings("unchecked")
+                        Map<UUID, Object> map = (Map<UUID, Object>) levelEntityByUuid.get(serverLevel);
+                        map.put(uuid, serverPlayer);
+                    } catch (Exception ignored) {}
+                }
+                if (levelEntitiesById != null) {
+                    try {
+                        Object entityId = serverPlayer.getClass().getMethod("getId").invoke(serverPlayer);
+                        @SuppressWarnings("unchecked")
+                        Map<Integer, Object> map = (Map<Integer, Object>) levelEntitiesById.get(serverLevel);
+                        map.put((Integer) entityId, serverPlayer);
+                    } catch (Exception ignored) {}
+                }
             }
         }
 
