@@ -4,6 +4,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
+import java.lang.reflect.Method;
 import java.util.UUID;
 
 public class BotNPC {
@@ -13,6 +14,7 @@ public class BotNPC {
     private Object serverPlayer;
     private Player bukkitPlayer;
     private boolean alive;
+    private Method tickMethod;
 
     public BotNPC(String name, UUID uuid) {
         this.name = name;
@@ -43,6 +45,7 @@ public class BotNPC {
                 serverPlayer = NMSHelper.createAndJoinFakePlayer(name, uuid, location);
                 bukkitPlayer = NMSHelper.toBukkitPlayer(serverPlayer);
                 bukkitPlayer.teleport(location);
+                try { tickMethod = serverPlayer.getClass().getMethod("tick"); } catch (Exception ignored) {}
                 NMSHelper.broadcastJoinMessage(name);
                 Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' spawned at " + location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ());
                 alive = true;
@@ -71,6 +74,9 @@ public class BotNPC {
     }
 
     public void tick() {
-        // Physics handled natively by the server entity tick
+        if (!alive || serverPlayer == null || tickMethod == null) return;
+        try {
+            tickMethod.invoke(serverPlayer);
+        } catch (Exception ignored) {}
     }
 }
