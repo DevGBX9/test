@@ -3,6 +3,7 @@ package devgbx9.mineflayer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
 
 import java.lang.reflect.Method;
 import java.util.UUID;
@@ -14,7 +15,12 @@ public class BotNPC {
     private Object serverPlayer;
     private Player bukkitPlayer;
     private boolean alive;
-    private Method tickMethod;
+
+    private Method getDeltaMovement;
+    private Method setDeltaMovement;
+    private Method moveMethod;
+    private Class<?> vec3Class;
+    private Object moverTypeSelf;
 
     public BotNPC(String name, UUID uuid) {
         this.name = name;
@@ -45,7 +51,7 @@ public class BotNPC {
                 serverPlayer = NMSHelper.createAndJoinFakePlayer(name, uuid, location);
                 bukkitPlayer = NMSHelper.toBukkitPlayer(serverPlayer);
                 bukkitPlayer.teleport(location);
-                try { tickMethod = serverPlayer.getClass().getMethod("tick"); } catch (Exception ignored) {}
+                initNMS();
                 NMSHelper.broadcastJoinMessage(name);
                 Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' spawned at " + location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ());
                 alive = true;
@@ -56,6 +62,21 @@ public class BotNPC {
         }
 
         Bukkit.getLogger().severe("[Mineflayer] Cannot spawn bot - NMS unavailable");
+    }
+
+    private void initNMS() {
+        try {
+            Class<?> entityCls = Class.forName("net.minecraft.world.entity.Entity");
+            vec3Class = Class.forName("net.minecraft.world.phys.Vec3");
+            Class<?> moverCls = Class.forName("net.minecraft.world.entity.MoverType");
+            getDeltaMovement = entityCls.getMethod("getDeltaMovement");
+            setDeltaMovement = entityCls.getMethod("setDeltaMovement", vec3Class);
+            moveMethod = entityCls.getMethod("move", moverCls, vec3Class);
+            for (Object c : moverCls.getEnumConstants()) {
+                if (c.toString().equals("SELF")) { moverTypeSelf = c; break; }
+            }
+            if (moverTypeSelf == null) moverTypeSelf = moverCls.getEnumConstants()[0];
+        } catch (Exception ignored) {}
     }
 
     public void remove() {
@@ -74,9 +95,34 @@ public class BotNPC {
     }
 
     public void tick() {
-        if (!alive || serverPlayer == null || tickMethod == null) return;
+        if (!alive || serverPlayer == null || getDeltaMovement == null) return;
         try {
-            tickMethod.invoke(serverPlayer);
+            // 1. Get current NMS velocity via public getter
+            Object delta = getDeltaMovement.invoke(serverPlayer);
+            double dx = (double) delta.getClass().getMethod("x").invoke(delta);
+            double dy = (double) delta.getClass().getMethod("y").invoke(delta);
+            double dz = (double) delta.getClass().getMethod("z").invoke(delta);
+
+            // 2. Apply vanilla gravity (game constant)
+            dy -= 0.08;
+
+            // 3. Set velocity via public setter
+            Object newDelta = vec3Class.getConstructor(double.class, double.class, double.class)
+                .newInstance(dx, dy, dz);
+            setDeltaMovement.invoke(serverPlayer, newDelta);
+
+            // 4. Call the game's own move() — handles collision, friction, position update
+            moveMethod.invoke(serverPlayer, moverTypeSelf, newDelta);
+
+            // 5. Sync position to nearby players (needed since no real client)
+            if (bukkitPlayer != null && bukkitPlayer.isOnline()) {
+                bukkitPlayer.teleport(bukkitPlayer.getLocation());
+                Object resultDelta = getDeltaMovement.invoke(serverPlayer);
+                double rdx = (double) resultDelta.getClass().getMethod("x").invoke(resultDelta);
+                double rdy = (double) resultDelta.getClass().getMethod("y").invoke(resultDelta);
+                double rdz = (double) resultDelta.getClass().getMethod("z").invoke(resultDelta);
+                bukkitPlayer.setVelocity(new Vector(rdx, rdy, rdz));
+            }
         } catch (Exception ignored) {}
     }
 }
