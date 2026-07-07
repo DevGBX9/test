@@ -35,6 +35,8 @@ public class NMSHelper {
 
     private static Field levelEntityByUuid;
     private static Field levelEntitiesById;
+    private static Method entityManagerAdd;
+    private static Object entityManager;
 
     private static Object packetFlowServerbound;
     private static Constructor<?> connectionConstructor;
@@ -67,24 +69,29 @@ public class NMSHelper {
             serverPlayerConstructor = findConstructor(serverPlayerCls, 4);
 
             Class<?> serverLevelCls2 = Class.forName("net.minecraft.server.level.ServerLevel");
-            String[] addNames = {"addNewPlayer", "addPlayer", "addEntity", "addFreshEntity"};
-            for (String name : addNames) {
-                try {
-                    Method m = serverLevelCls2.getDeclaredMethod(name, serverPlayerCls);
-                    m.setAccessible(true);
-                    serverLevelAddPlayer = m;
-                    break;
-                } catch (NoSuchMethodException ign) {}
-            }
-            if (serverLevelAddPlayer == null) {
-                Class<?> entityCls = Class.forName("net.minecraft.world.entity.Entity");
-                for (String name : addNames) {
-                    try {
-                        Method m = serverLevelCls2.getDeclaredMethod(name, entityCls);
-                        m.setAccessible(true);
+            Class<?> entityCls = Class.forName("net.minecraft.world.entity.Entity");
+            // Try declared + public methods (addEntity is inherited from Level)
+            for (Method m : serverLevelCls2.getMethods()) {
+                String n = m.getName();
+                Class<?>[] p = m.getParameterTypes();
+                if (p.length == 1 && ("addEntity".equals(n) || "addFreshEntity".equals(n))) {
+                    if (p[0].isAssignableFrom(serverPlayerCls)) {
                         serverLevelAddPlayer = m;
                         break;
-                    } catch (NoSuchMethodException ign) {}
+                    }
+                }
+            }
+            if (serverLevelAddPlayer == null) {
+                for (Method m : serverLevelCls2.getDeclaredMethods()) {
+                    String n = m.getName();
+                    Class<?>[] p = m.getParameterTypes();
+                    if (p.length == 1 && ("addNewPlayer".equals(n) || "addPlayer".equals(n))) {
+                        if (p[0].isAssignableFrom(serverPlayerCls)) {
+                            m.setAccessible(true);
+                            serverLevelAddPlayer = m;
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -98,6 +105,19 @@ public class NMSHelper {
             for (String fn : idFieldNames) {
                 levelEntitiesById = getAccessibleField(serverLevelCls2, fn);
                 if (levelEntitiesById != null) break;
+            }
+
+            // Entity manager fallback (handles tracker + ticking)
+            Field emField = getAccessibleField(serverLevelCls2, "entityManager");
+            if (emField == null) emField = findFieldByType(serverLevelCls2, "PersistentEntitySectionManager");
+            if (emField != null) {
+                for (Method m : emField.getType().getMethods()) {
+                    if ("addEntity".equals(m.getName()) && m.getParameterCount() == 1) {
+                        m.setAccessible(true);
+                        entityManagerAdd = m;
+                        break;
+                    }
+                }
             }
 
             Class<?> clientInfoCls = Class.forName("net.minecraft.server.level.ClientInformation");
@@ -209,6 +229,16 @@ public class NMSHelper {
         if (serverLevelAddPlayer != null) {
             try {
                 serverLevelAddPlayer.invoke(serverLevel, serverPlayer);
+                addedToLevel = true;
+            } catch (Exception ignored) {}
+        }
+
+        if (!addedToLevel && entityManagerAdd != null) {
+            try {
+                Field emf = serverLevel.getClass().getDeclaredField("entityManager");
+                emf.setAccessible(true);
+                Object em = emf.get(serverLevel);
+                entityManagerAdd.invoke(em, serverPlayer);
                 addedToLevel = true;
             } catch (Exception ignored) {}
         }
