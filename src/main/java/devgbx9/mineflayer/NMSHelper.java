@@ -7,6 +7,7 @@ import org.bukkit.entity.Player;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -34,6 +35,15 @@ public class NMSHelper {
 
     private static Field levelEntityByUuid;
     private static Field levelEntitiesById;
+
+    private static Object packetFlowServerbound;
+    private static Constructor<?> connectionConstructor;
+    private static Field connectionAddressField;
+    private static Field connectionChannelField;
+    private static Object unsafe;
+    private static Constructor<?> gamePacketListenerConstructor;
+    private static Method cookieCreateInitial;
+    private static Field serverPlayerConnectionField;
 
     public static boolean isAvailable() {
         return initialized;
@@ -96,6 +106,38 @@ public class NMSHelper {
             Class<?> gpClass = Class.forName("com.mojang.authlib.GameProfile");
             gameProfileConstructor = gpClass.getConstructor(UUID.class, String.class);
 
+            Class<?> packetFlowCls = resolveClass("net.minecraft.network.PacketFlow", "net.minecraft.network.protocol.PacketFlow");
+            if (packetFlowCls != null) {
+                for (Object c : packetFlowCls.getEnumConstants()) {
+                    if (c.toString().equals("SERVERBOUND")) { packetFlowServerbound = c; break; }
+                }
+                if (packetFlowServerbound == null) packetFlowServerbound = packetFlowCls.getEnumConstants()[0];
+            }
+
+            Class<?> connectionCls = Class.forName("net.minecraft.network.Connection");
+            for (Constructor<?> c : connectionCls.getDeclaredConstructors()) {
+                Class<?>[] p = c.getParameterTypes();
+                if (p.length >= 1 && packetFlowCls != null && p[0].isAssignableFrom(packetFlowCls)) {
+                    c.setAccessible(true);
+                    connectionConstructor = c;
+                    break;
+                }
+            }
+            connectionAddressField = getAccessibleField(connectionCls, "address");
+            connectionChannelField = getAccessibleField(connectionCls, "channel");
+            try {
+                Class<?> u = Class.forName("sun.misc.Unsafe");
+                Field f = u.getDeclaredField("theUnsafe");
+                f.setAccessible(true);
+                unsafe = f.get(null);
+            } catch (Exception ignored) {}
+
+            Class<?> listenerCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
+            Class<?> cookieCls = Class.forName("net.minecraft.server.network.CommonListenerCookie");
+            cookieCreateInitial = findMethod(cookieCls, "createInitial", 2);
+            gamePacketListenerConstructor = findConstructor(listenerCls, 4);
+            serverPlayerConnectionField = findFieldByType(serverPlayerCls, "ServerGamePacketListenerImpl");
+
             Class<?> playerListCls = Class.forName("net.minecraft.server.players.PlayerList");
             playerListRemove = findMethod(playerListCls, "remove", 1);
             playerListPlayersField = getAccessibleField(playerListCls, "players");
@@ -117,6 +159,33 @@ public class NMSHelper {
         Object profile = gameProfileConstructor.newInstance(uuid, name);
         Object clientInfo = clientInformationCreateDefault.invoke(null);
         Object serverPlayer = serverPlayerConstructor.newInstance(nmsServer, serverLevel, profile, clientInfo);
+
+        // Create fake connection (prevents NPE in server tick)
+        Object conn = null;
+        if (packetFlowServerbound != null && connectionConstructor != null) {
+            try {
+                conn = connectionConstructor.newInstance(packetFlowServerbound);
+                if (connectionAddressField != null) {
+                    connectionAddressField.set(conn, new InetSocketAddress("127.0.0.1", 0));
+                }
+                if (connectionChannelField != null) {
+                    Class<?> ecCls = Class.forName("io.netty.channel.embedded.EmbeddedChannel");
+                    connectionChannelField.set(conn, ecCls.getDeclaredConstructor().newInstance());
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // Create fake packet listener (required for connection to work)
+        Object cookie = null;
+        if (cookieCreateInitial != null) {
+            try { cookie = cookieCreateInitial.invoke(null, profile, false); } catch (Exception ignored) {}
+        }
+        if (conn != null && serverPlayerConnectionField != null && gamePacketListenerConstructor != null && cookie != null) {
+            try {
+                Object listener = gamePacketListenerConstructor.newInstance(nmsServer, conn, serverPlayer, cookie);
+                serverPlayerConnectionField.set(serverPlayer, listener);
+            } catch (Exception ignored) {}
+        }
 
         Object playerList = minecraftServerGetPlayerList.invoke(nmsServer);
 
@@ -218,6 +287,13 @@ public class NMSHelper {
     private static Constructor<?> findConstructor(Class<?> cls, int paramCount) {
         for (Constructor<?> c : cls.getDeclaredConstructors()) {
             if (c.getParameterCount() == paramCount) { c.setAccessible(true); return c; }
+        }
+        return null;
+    }
+
+    private static Field findFieldByType(Class<?> cls, String simple) {
+        for (Field f : cls.getDeclaredFields()) {
+            if (f.getType().getSimpleName().equals(simple)) { f.setAccessible(true); return f; }
         }
         return null;
     }
