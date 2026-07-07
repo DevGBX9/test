@@ -7,7 +7,6 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,8 +23,6 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
         botManager = new BotManager();
         getServer().getPluginManager().registerEvents(new BotListener(botManager), this);
 
-        startTickTask();
-
         getLogger().info(getName() + " v" + getPluginMeta().getVersion() + " enabled!");
     }
 
@@ -35,18 +32,6 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
             botManager.removeAll();
         }
         getLogger().info(getName() + " disabled!");
-    }
-
-    private void startTickTask() {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                if (botManager == null) return;
-                for (BotNPC bot : botManager.getAllBots()) {
-                    bot.tick();
-                }
-            }
-        }.runTaskTimer(this, 20L, 1L);
     }
 
     @Override

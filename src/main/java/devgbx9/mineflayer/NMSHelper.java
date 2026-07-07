@@ -44,6 +44,9 @@ public class NMSHelper {
     private static Constructor<?> gamePacketListenerConstructor;
     private static Method cookieCreateInitial;
 
+    private static Field levelEntityByUuid;
+    private static Field levelEntitiesById;
+
     public static boolean isAvailable() {
         return initialized;
     }
@@ -85,6 +88,18 @@ public class NMSHelper {
                         break;
                     } catch (NoSuchMethodException ign) {}
                 }
+            }
+
+            // Fallback: direct entity map access for natural ticking
+            String[] uuidFieldNames = {"entityByUuid", "entitiesByUUID", "uuidMap"};
+            for (String fn : uuidFieldNames) {
+                levelEntityByUuid = getAccessibleField(serverLevelCls2, fn);
+                if (levelEntityByUuid != null) break;
+            }
+            String[] idFieldNames = {"entitiesById", "entityById", "idMap"};
+            for (String fn : idFieldNames) {
+                levelEntitiesById = getAccessibleField(serverLevelCls2, fn);
+                if (levelEntitiesById != null) break;
             }
 
             Class<?> clientInfoCls = Class.forName("net.minecraft.server.level.ClientInformation");
@@ -185,10 +200,31 @@ public class NMSHelper {
             byUUID.put(uuid, serverPlayer);
         }
 
+        boolean addedToLevel = false;
         if (serverLevelAddPlayer != null) {
             try {
                 serverLevelAddPlayer.invoke(serverLevel, serverPlayer);
+                addedToLevel = true;
             } catch (Exception ignored) {}
+        }
+
+        if (!addedToLevel) {
+            // Fallback: directly register entity in the world's internal maps for ticking
+            if (levelEntityByUuid != null) {
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<UUID, Object> map = (Map<UUID, Object>) levelEntityByUuid.get(serverLevel);
+                    map.put(uuid, serverPlayer);
+                } catch (Exception ignored) {}
+            }
+            if (levelEntitiesById != null) {
+                try {
+                    Object entityId = serverPlayer.getClass().getMethod("getId").invoke(serverPlayer);
+                    @SuppressWarnings("unchecked")
+                    Map<Integer, Object> map = (Map<Integer, Object>) levelEntitiesById.get(serverLevel);
+                    map.put((Integer) entityId, serverPlayer);
+                } catch (Exception ignored) {}
+            }
         }
 
         return serverPlayer;
