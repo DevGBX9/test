@@ -5,6 +5,7 @@ import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
+import java.lang.reflect.Method;
 import java.util.UUID;
 
 public class BotNPC {
@@ -72,10 +73,17 @@ public class BotNPC {
     }
 
     public void tick() {
-        if (!alive || bukkitPlayer == null || !bukkitPlayer.isOnline()) return;
+        if (!alive || serverPlayer == null) return;
 
-        Vector vel = bukkitPlayer.getVelocity();
-        vel.setY(vel.getY() - 0.08);
-        bukkitPlayer.setVelocity(vel);
+        try {
+            Method tick = serverPlayer.getClass().getMethod("tick");
+            tick.invoke(serverPlayer);
+        } catch (Exception ignored) {
+            if (bukkitPlayer != null && bukkitPlayer.isOnline()) {
+                Vector vel = bukkitPlayer.getVelocity();
+                vel.setY(vel.getY() - 0.08);
+                bukkitPlayer.setVelocity(vel);
+            }
+        }
     }
 }
