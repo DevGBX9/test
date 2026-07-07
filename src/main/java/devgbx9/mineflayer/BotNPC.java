@@ -19,6 +19,7 @@ public class BotNPC {
     private Method getDeltaMovement;
     private Method setDeltaMovement;
     private Method moveMethod;
+    private Method knockbackMethod;
     private Class<?> vec3Class;
     private Object moverTypeSelf;
 
@@ -72,6 +73,8 @@ public class BotNPC {
             getDeltaMovement = entityCls.getMethod("getDeltaMovement");
             setDeltaMovement = entityCls.getMethod("setDeltaMovement", vec3Class);
             moveMethod = entityCls.getMethod("move", moverCls, vec3Class);
+            Class<?> livingCls = Class.forName("net.minecraft.world.entity.LivingEntity");
+            knockbackMethod = livingCls.getMethod("knockback", double.class, double.class, double.class);
             for (Object c : moverCls.getEnumConstants()) {
                 if (c.toString().equals("SELF")) { moverTypeSelf = c; break; }
             }
@@ -92,6 +95,13 @@ public class BotNPC {
         serverPlayer = null;
         bukkitPlayer = null;
         alive = false;
+    }
+
+    public void nativeKnockback(double strength, double x, double z) {
+        if (!alive || serverPlayer == null || knockbackMethod == null) return;
+        try {
+            knockbackMethod.invoke(serverPlayer, strength, x, z);
+        } catch (Exception ignored) {}
     }
 
     public void tick() {
