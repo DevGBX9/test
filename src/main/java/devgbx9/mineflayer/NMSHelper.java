@@ -228,9 +228,11 @@ public class NMSHelper {
             try {
                 Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
                 for (Constructor<?> c : propCls.getDeclaredConstructors()) {
-                    if (c.getParameterCount() == 3) { propertyConstructor3 = c; }
-                    if (c.getParameterCount() == 2) { propertyConstructor2 = c; }
+                    if (c.getParameterCount() == 3) propertyConstructor3 = c;
+                    if (c.getParameterCount() == 2) propertyConstructor2 = c;
                 }
+            } catch (Exception ignored) {}
+            try {
                 Class<?> gpCls = Class.forName("com.mojang.authlib.GameProfile");
                 gameProfileGetProperties = gpCls.getMethod("getProperties");
                 gameProfileGetId = gpCls.getMethod("getId");
@@ -402,7 +404,10 @@ public class NMSHelper {
             } catch (Exception ignored) {}
         }
 
-        if (!placedNormally) {
+            if (!placedNormally) {
+            UUID profileId = (gameProfileGetId != null && profile != null)
+                ? (UUID) gameProfileGetId.invoke(profile) : UUID.randomUUID();
+
             if (playerListPlayersField != null) {
                 @SuppressWarnings("unchecked")
                 List<Object> players = (List<Object>) playerListPlayersField.get(playerList);
@@ -416,10 +421,8 @@ public class NMSHelper {
             if (playerListByUUIDField != null) {
                 @SuppressWarnings("unchecked")
                 Map<UUID, Object> byUUID = (Map<UUID, Object>) playerListByUUIDField.get(playerList);
-                UUID profileId = (UUID) gameProfileGetId.invoke(profile);
                 byUUID.put(profileId, serverPlayer);
             }
-            UUID profileId = (UUID) gameProfileGetId.invoke(profile);
             addEntityToLevel(serverLevel, serverPlayer, profileId);
         }
 
