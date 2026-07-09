@@ -80,20 +80,15 @@ public class BotNPC {
         if (!alive || serverPlayer == null) return;
         try {
             // Apply native server-side physics
-            Object currentVelocity = NMSHelper.getDeltaMovement(serverPlayer);
-            double vx = 0;
-            double vy = 0;
-            double vz = 0;
-            if (currentVelocity != null) {
-                vx = NMSHelper.getVec3X(currentVelocity);
-                vy = NMSHelper.getVec3Y(currentVelocity);
-                vz = NMSHelper.getVec3Z(currentVelocity);
-            }
+            org.bukkit.util.Vector velocity = bukkitPlayer.getVelocity();
+            double vx = velocity.getX();
+            double vy = velocity.getY();
+            double vz = velocity.getZ();
 
-            boolean onGround = NMSHelper.onGround(serverPlayer);
-            boolean isNoGravity = NMSHelper.isNoGravity(serverPlayer);
+            boolean onGround = bukkitPlayer.isOnGround();
+            boolean hasGravity = bukkitPlayer.hasGravity();
 
-            if (!isNoGravity) {
+            if (hasGravity) {
                 if (!onGround) {
                     vy -= 0.08;
                     if (vy < -3.92) {
@@ -111,16 +106,14 @@ public class BotNPC {
                 NMSHelper.move(serverPlayer, vec3Move);
             }
 
-            Object postMoveVelocity = NMSHelper.getDeltaMovement(serverPlayer);
-            if (postMoveVelocity != null) {
-                double pvx = NMSHelper.getVec3X(postMoveVelocity);
-                double pvy = NMSHelper.getVec3Y(postMoveVelocity);
-                double pvz = NMSHelper.getVec3Z(postMoveVelocity);
-                if (NMSHelper.onGround(serverPlayer) && pvy < 0) {
-                    pvy = 0;
-                }
-                NMSHelper.setDeltaMovement(serverPlayer, NMSHelper.createVec3(pvx, pvy, pvz));
+            org.bukkit.util.Vector postMoveVelocity = bukkitPlayer.getVelocity();
+            double pvx = postMoveVelocity.getX();
+            double pvy = postMoveVelocity.getY();
+            double pvz = postMoveVelocity.getZ();
+            if (bukkitPlayer.isOnGround() && pvy < 0) {
+                pvy = 0;
             }
+            bukkitPlayer.setVelocity(new org.bukkit.util.Vector(pvx, pvy, pvz));
 
             // Connection keepalive and ping tick updates
             if (connectionField != null) {
@@ -160,11 +153,11 @@ public class BotNPC {
             if (bukkitPlayer != null && bukkitPlayer.isOnline()) {
                 Player nearest = findNearestPlayer();
                 if (nearest != null) {
-                    Location botLoc = bukkitPlayer.getLocation();
+                    Location botEyeLoc = bukkitPlayer.getEyeLocation();
                     Location targetLoc = nearest.getEyeLocation();
-                    double dx = targetLoc.getX() - botLoc.getX();
-                    double dy = targetLoc.getY() - botLoc.getY();
-                    double dz = targetLoc.getZ() - botLoc.getZ();
+                    double dx = targetLoc.getX() - botEyeLoc.getX();
+                    double dy = targetLoc.getY() - botEyeLoc.getY();
+                    double dz = targetLoc.getZ() - botEyeLoc.getZ();
                     double dist = Math.sqrt(dx * dx + dz * dz);
                     if (dist > 0.001 || Math.abs(dy) > 0.001) {
                         float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;

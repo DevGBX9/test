@@ -67,11 +67,8 @@ public class NMSHelper {
     private static Constructor<?> propertyConstructor2;
     private static Method gameProfileGetProperties;
 
-    private static Method entityGetDeltaMovement;
-    private static Method entitySetDeltaMovement;
     private static Method entityMove;
-    private static Method entityOnGround;
-    private static Method entityIsNoGravity;
+    private static Method entityMoveTo;
     private static Object moverTypeSelf;
     private static Constructor<?> vec3Constructor;
     private static Field vec3XField;
@@ -317,21 +314,44 @@ public class NMSHelper {
                 Class<?> vec3Cls = Class.forName("net.minecraft.world.phys.Vec3");
                 Class<?> moverTypeCls = Class.forName("net.minecraft.world.entity.MoverType");
 
-                entityGetDeltaMovement = entityCls.getMethod("getDeltaMovement");
-                entitySetDeltaMovement = entityCls.getMethod("setDeltaMovement", vec3Cls);
-                entityMove = entityCls.getMethod("move", moverTypeCls, vec3Cls);
+                // Find Entity.move(MoverType, Vec3) dynamically to bypass obfuscation names!
+                for (Method m : entityCls.getDeclaredMethods()) {
+                    Class<?>[] params = m.getParameterTypes();
+                    if (params.length == 2 && params[0] == moverTypeCls && params[1] == vec3Cls) {
+                        m.setAccessible(true);
+                        entityMove = m;
+                        break;
+                    }
+                }
 
-                entityOnGround = findMethod(entityCls, "onGround", 0);
-                if (entityOnGround == null) entityOnGround = entityCls.getMethod("onGround");
-
-                entityIsNoGravity = entityCls.getMethod("isNoGravity");
+                // Find Entity.moveTo/absMoveTo/setLocation dynamically
+                try {
+                    entityMoveTo = entityCls.getMethod("moveTo", double.class, double.class, double.class, float.class, float.class);
+                } catch (NoSuchMethodException e) {
+                    try {
+                        entityMoveTo = entityCls.getMethod("absMoveTo", double.class, double.class, double.class, float.class, float.class);
+                    } catch (NoSuchMethodException e2) {
+                        try {
+                            entityMoveTo = entityCls.getMethod("setLocation", double.class, double.class, double.class, float.class, float.class);
+                        } catch (NoSuchMethodException ignored) {}
+                    }
+                }
 
                 moverTypeSelf = moverTypeCls.getField("SELF").get(null);
 
                 vec3Constructor = vec3Cls.getConstructor(double.class, double.class, double.class);
-                vec3XField = vec3Cls.getField("x");
-                vec3YField = vec3Cls.getField("y");
-                vec3ZField = vec3Cls.getField("z");
+
+                // Find double fields dynamically to bypass obfuscation names
+                int doubleCount = 0;
+                for (Field f : vec3Cls.getDeclaredFields()) {
+                    if (f.getType() == double.class) {
+                        f.setAccessible(true);
+                        if (doubleCount == 0) vec3XField = f;
+                        else if (doubleCount == 1) vec3YField = f;
+                        else if (doubleCount == 2) vec3ZField = f;
+                        doubleCount++;
+                    }
+                }
 
                 Class<?> livingEntityCls = Class.forName("net.minecraft.world.entity.LivingEntity");
                 try {
@@ -343,7 +363,7 @@ public class NMSHelper {
                     livingEntityYBodyRotField = f;
                 } catch (Exception ignored) {}
             } catch (Exception e) {
-                Bukkit.getLogger().severe("[Mineflayer] Native physics initialization failed: " + e.getMessage());
+                Bukkit.getLogger().severe("[Mineflayer] Native NMS initialization failed: " + e.getMessage());
             }
 
             initialized = true;
@@ -370,6 +390,7 @@ public class NMSHelper {
         String json2 = null;
 
         try {
+            Bukkit.getLogger().info("[Mineflayer] Fetching skin UUID for bot: " + name);
             URL url = new URI("https://api.mojang.com/users/profiles/minecraft/" + name).toURL();
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setConnectTimeout(3000);
@@ -381,9 +402,11 @@ public class NMSHelper {
                 try (InputStream is = conn.getInputStream()) {
                     json = new String(is.readAllBytes());
                 }
+                json = json.replaceAll("\\s+", "");
                 String realUuidStr = extractJsonString(json, "id");
                 if (realUuidStr != null) {
                     finalUuid = parseUuid(realUuidStr);
+                    Bukkit.getLogger().info("[Mineflayer] Fetched UUID for bot " + name + ": " + finalUuid);
 
                     URL sessionUrl = new URI("https://sessionserver.mojang.com/session/minecraft/profile/" + realUuidStr + "?unsigned=false").toURL();
                     HttpURLConnection conn2 = (HttpURLConnection) sessionUrl.openConnection();
@@ -395,13 +418,17 @@ public class NMSHelper {
                         try (InputStream is2 = conn2.getInputStream()) {
                             json2 = new String(is2.readAllBytes());
                         }
+                        json2 = json2.replaceAll("\\s+", "");
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            Bukkit.getLogger().warning("[Mineflayer] Error fetching skin for " + name + ": " + e.getMessage());
+        }
 
         if (finalUuid == null) {
             finalUuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            Bukkit.getLogger().info("[Mineflayer] Skin fetch failed. Using offline UUID for bot " + name + ": " + finalUuid);
         }
 
         Object profile;
@@ -430,6 +457,7 @@ public class NMSHelper {
     @SuppressWarnings("unchecked")
     private static void parseSkinPropertiesReflect(String json, Object profile) {
         if (gameProfileGetProperties == null || (propertyConstructor2 == null && propertyConstructor3 == null)) return;
+        json = json.replaceAll("\\s+", "");
         String propsKey = "\"properties\":[";
         int propsStart = json.indexOf(propsKey);
         if (propsStart == -1) return;
@@ -485,6 +513,14 @@ public class NMSHelper {
 
         Object clientInfo = clientInformationCreateDefault.invoke(null);
         Object serverPlayer = serverPlayerConstructor.newInstance(nmsServer, serverLevel, profile, clientInfo);
+
+        if (entityMoveTo != null) {
+            try {
+                entityMoveTo.invoke(serverPlayer, location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch());
+            } catch (Exception e) {
+                Bukkit.getLogger().warning("[Mineflayer] moveTo failed: " + e.getMessage());
+            }
+        }
 
         Object conn = null;
         if (packetFlowServerbound != null && connectionConstructor != null) {
@@ -779,37 +815,10 @@ public class NMSHelper {
         }
     }
 
-    public static Object getDeltaMovement(Object entity) {
-        if (entityGetDeltaMovement != null) {
-            try { return entityGetDeltaMovement.invoke(entity); } catch (Exception ignored) {}
-        }
-        return null;
-    }
-
-    public static void setDeltaMovement(Object entity, Object vec3) {
-        if (entitySetDeltaMovement != null) {
-            try { entitySetDeltaMovement.invoke(entity, vec3); } catch (Exception ignored) {}
-        }
-    }
-
     public static void move(Object entity, Object vec3) {
         if (entityMove != null && moverTypeSelf != null) {
             try { entityMove.invoke(entity, moverTypeSelf, vec3); } catch (Exception ignored) {}
         }
-    }
-
-    public static boolean onGround(Object entity) {
-        if (entityOnGround != null) {
-            try { return (boolean) entityOnGround.invoke(entity); } catch (Exception ignored) {}
-        }
-        return true;
-    }
-
-    public static boolean isNoGravity(Object entity) {
-        if (entityIsNoGravity != null) {
-            try { return (boolean) entityIsNoGravity.invoke(entity); } catch (Exception ignored) {}
-        }
-        return false;
     }
 
     public static Object createVec3(double x, double y, double z) {
@@ -817,27 +826,6 @@ public class NMSHelper {
             try { return vec3Constructor.newInstance(x, y, z); } catch (Exception ignored) {}
         }
         return null;
-    }
-
-    public static double getVec3X(Object vec3) {
-        if (vec3XField != null && vec3 != null) {
-            try { return vec3XField.getDouble(vec3); } catch (Exception ignored) {}
-        }
-        return 0;
-    }
-
-    public static double getVec3Y(Object vec3) {
-        if (vec3YField != null && vec3 != null) {
-            try { return vec3YField.getDouble(vec3); } catch (Exception ignored) {}
-        }
-        return 0;
-    }
-
-    public static double getVec3Z(Object vec3) {
-        if (vec3ZField != null && vec3 != null) {
-            try { return vec3ZField.getDouble(vec3); } catch (Exception ignored) {}
-        }
-        return 0;
     }
 
     public static float getYaw(Object serverPlayer) {
