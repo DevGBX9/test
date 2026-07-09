@@ -316,7 +316,6 @@ public class NMSHelper {
             try {
                 Class<?> vec3Cls = Class.forName("net.minecraft.world.phys.Vec3");
                 Class<?> moverTypeCls = Class.forName("net.minecraft.world.entity.MoverType");
-                Class<?> entityCls = Class.forName("net.minecraft.world.entity.Entity");
 
                 entityGetDeltaMovement = entityCls.getMethod("getDeltaMovement");
                 entitySetDeltaMovement = entityCls.getMethod("setDeltaMovement", vec3Cls);
