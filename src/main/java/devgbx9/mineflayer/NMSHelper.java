@@ -67,6 +67,19 @@ public class NMSHelper {
     private static Constructor<?> propertyConstructor2;
     private static Method gameProfileGetProperties;
 
+    private static Method entityGetDeltaMovement;
+    private static Method entitySetDeltaMovement;
+    private static Method entityMove;
+    private static Method entityOnGround;
+    private static Method entityIsNoGravity;
+    private static Object moverTypeSelf;
+    private static Constructor<?> vec3Constructor;
+    private static Field vec3XField;
+    private static Field vec3YField;
+    private static Field vec3ZField;
+    private static Method livingEntitySetYHeadRot;
+    private static Field livingEntityYBodyRotField;
+
     public static boolean isAvailable() {
         return initialized;
     }
@@ -300,6 +313,40 @@ public class NMSHelper {
                 gameProfileGetId = gpCls.getMethod("getId");
             } catch (Exception ignored) {}
 
+            try {
+                Class<?> vec3Cls = Class.forName("net.minecraft.world.phys.Vec3");
+                Class<?> moverTypeCls = Class.forName("net.minecraft.world.entity.MoverType");
+                Class<?> entityCls = Class.forName("net.minecraft.world.entity.Entity");
+
+                entityGetDeltaMovement = entityCls.getMethod("getDeltaMovement");
+                entitySetDeltaMovement = entityCls.getMethod("setDeltaMovement", vec3Cls);
+                entityMove = entityCls.getMethod("move", moverTypeCls, vec3Cls);
+
+                entityOnGround = findMethod(entityCls, "onGround", 0);
+                if (entityOnGround == null) entityOnGround = entityCls.getMethod("onGround");
+
+                entityIsNoGravity = entityCls.getMethod("isNoGravity");
+
+                moverTypeSelf = moverTypeCls.getField("SELF").get(null);
+
+                vec3Constructor = vec3Cls.getConstructor(double.class, double.class, double.class);
+                vec3XField = vec3Cls.getField("x");
+                vec3YField = vec3Cls.getField("y");
+                vec3ZField = vec3Cls.getField("z");
+
+                Class<?> livingEntityCls = Class.forName("net.minecraft.world.entity.LivingEntity");
+                try {
+                    livingEntitySetYHeadRot = livingEntityCls.getMethod("setYHeadRot", float.class);
+                } catch (Exception ignored) {}
+                try {
+                    Field f = livingEntityCls.getDeclaredField("yBodyRot");
+                    f.setAccessible(true);
+                    livingEntityYBodyRotField = f;
+                } catch (Exception ignored) {}
+            } catch (Exception e) {
+                Bukkit.getLogger().severe("[Mineflayer] Native physics initialization failed: " + e.getMessage());
+            }
+
             initialized = true;
             Bukkit.getLogger().info("[Mineflayer] NMS ready");
         } catch (Exception e) {
@@ -307,19 +354,27 @@ public class NMSHelper {
         }
     }
 
-    public static Object createProfileWithSkin(String name, UUID uuid) {
-        Object profile;
-        try {
-            profile = gameProfileConstructor.newInstance(uuid, name);
-        } catch (Exception e) {
-            return null;
+    public static UUID parseUuid(String uuidStr) {
+        if (uuidStr.length() == 32) {
+            String formatted = uuidStr.substring(0, 8) + "-" +
+                               uuidStr.substring(8, 12) + "-" +
+                               uuidStr.substring(12, 16) + "-" +
+                               uuidStr.substring(16, 20) + "-" +
+                               uuidStr.substring(20);
+            return java.util.UUID.fromString(formatted);
         }
+        return java.util.UUID.fromString(uuidStr);
+    }
+
+    public static Object createProfileWithSkin(String name, UUID fallbackUuid) {
+        UUID finalUuid = null;
+        String json2 = null;
 
         try {
             URL url = new URI("https://api.mojang.com/users/profiles/minecraft/" + name).toURL();
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(5000);
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(3000);
             conn.setRequestProperty("User-Agent", "Mineflayer");
 
             if (conn.getResponseCode() == 200) {
@@ -327,24 +382,39 @@ public class NMSHelper {
                 try (InputStream is = conn.getInputStream()) {
                     json = new String(is.readAllBytes());
                 }
-                String realUuid = extractJsonString(json, "id");
-                if (realUuid == null) return profile;
+                String realUuidStr = extractJsonString(json, "id");
+                if (realUuidStr != null) {
+                    finalUuid = parseUuid(realUuidStr);
 
-                URL sessionUrl = new URI("https://sessionserver.mojang.com/session/minecraft/profile/" + realUuid).toURL();
-                HttpURLConnection conn2 = (HttpURLConnection) sessionUrl.openConnection();
-                conn2.setConnectTimeout(5000);
-                conn2.setReadTimeout(5000);
-                conn2.setRequestProperty("User-Agent", "Mineflayer");
+                    URL sessionUrl = new URI("https://sessionserver.mojang.com/session/minecraft/profile/" + realUuidStr + "?unsigned=false").toURL();
+                    HttpURLConnection conn2 = (HttpURLConnection) sessionUrl.openConnection();
+                    conn2.setConnectTimeout(3000);
+                    conn2.setReadTimeout(3000);
+                    conn2.setRequestProperty("User-Agent", "Mineflayer");
 
-                if (conn2.getResponseCode() == 200) {
-                    String json2;
-                    try (InputStream is2 = conn2.getInputStream()) {
-                        json2 = new String(is2.readAllBytes());
+                    if (conn2.getResponseCode() == 200) {
+                        try (InputStream is2 = conn2.getInputStream()) {
+                            json2 = new String(is2.readAllBytes());
+                        }
                     }
-                    parseSkinPropertiesReflect(json2, profile);
                 }
             }
         } catch (Exception ignored) {}
+
+        if (finalUuid == null) {
+            finalUuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+
+        Object profile;
+        try {
+            profile = gameProfileConstructor.newInstance(finalUuid, name);
+        } catch (Exception e) {
+            return null;
+        }
+
+        if (json2 != null) {
+            parseSkinPropertiesReflect(json2, profile);
+        }
 
         return profile;
     }
@@ -692,12 +762,83 @@ public class NMSHelper {
     }
 
     public static void setRotation(Object serverPlayer, float yaw, float pitch) {
+        setRotation(serverPlayer, yaw, pitch, yaw);
+    }
+
+    public static void setRotation(Object serverPlayer, float yaw, float pitch, float headYaw) {
         if (entitySetYRot != null && entitySetXRot != null) {
             try {
                 entitySetYRot.invoke(serverPlayer, yaw);
                 entitySetXRot.invoke(serverPlayer, pitch);
+                if (livingEntitySetYHeadRot != null) {
+                    livingEntitySetYHeadRot.invoke(serverPlayer, headYaw);
+                }
+                if (livingEntityYBodyRotField != null) {
+                    livingEntityYBodyRotField.setFloat(serverPlayer, yaw);
+                }
             } catch (Exception ignored) {}
         }
+    }
+
+    public static Object getDeltaMovement(Object entity) {
+        if (entityGetDeltaMovement != null) {
+            try { return entityGetDeltaMovement.invoke(entity); } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    public static void setDeltaMovement(Object entity, Object vec3) {
+        if (entitySetDeltaMovement != null) {
+            try { entitySetDeltaMovement.invoke(entity, vec3); } catch (Exception ignored) {}
+        }
+    }
+
+    public static void move(Object entity, Object vec3) {
+        if (entityMove != null && moverTypeSelf != null) {
+            try { entityMove.invoke(entity, moverTypeSelf, vec3); } catch (Exception ignored) {}
+        }
+    }
+
+    public static boolean onGround(Object entity) {
+        if (entityOnGround != null) {
+            try { return (boolean) entityOnGround.invoke(entity); } catch (Exception ignored) {}
+        }
+        return true;
+    }
+
+    public static boolean isNoGravity(Object entity) {
+        if (entityIsNoGravity != null) {
+            try { return (boolean) entityIsNoGravity.invoke(entity); } catch (Exception ignored) {}
+        }
+        return false;
+    }
+
+    public static Object createVec3(double x, double y, double z) {
+        if (vec3Constructor != null) {
+            try { return vec3Constructor.newInstance(x, y, z); } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    public static double getVec3X(Object vec3) {
+        if (vec3XField != null && vec3 != null) {
+            try { return vec3XField.getDouble(vec3); } catch (Exception ignored) {}
+        }
+        return 0;
+    }
+
+    public static double getVec3Y(Object vec3) {
+        if (vec3YField != null && vec3 != null) {
+            try { return vec3YField.getDouble(vec3); } catch (Exception ignored) {}
+        }
+        return 0;
+    }
+
+    public static double getVec3Z(Object vec3) {
+        if (vec3ZField != null && vec3 != null) {
+            try { return vec3ZField.getDouble(vec3); } catch (Exception ignored) {}
+        }
+        return 0;
     }
 
     public static float getYaw(Object serverPlayer) {

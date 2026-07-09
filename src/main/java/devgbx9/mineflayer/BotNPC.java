@@ -16,7 +16,6 @@ public class BotNPC {
     private Player bukkitPlayer;
     private boolean alive;
 
-    private Method serverPlayerTick;
     private Field connectionField;
 
     public BotNPC(String name, UUID uuid) {
@@ -43,9 +42,6 @@ public class BotNPC {
 
             NMSHelper.registerEntityInWorld(serverPlayer, location.getWorld());
             NMSHelper.broadcastBotSpawn(serverPlayer);
-
-            Class<?> entityCls = Class.forName("net.minecraft.world.entity.Entity");
-            serverPlayerTick = entityCls.getMethod("tick");
 
             connectionField = null;
             for (Field f : serverPlayer.getClass().getDeclaredFields()) {
@@ -80,16 +76,53 @@ public class BotNPC {
         alive = false;
     }
 
-    public void nativeKnockback(double strength, double x, double z) {
-        if (!alive || serverPlayer == null) return;
-        NMSHelper.nativeKnockback(serverPlayer, strength, x, z);
-    }
-
     public void tick() {
         if (!alive || serverPlayer == null) return;
         try {
-            serverPlayerTick.invoke(serverPlayer);
+            // Apply native server-side physics
+            Object currentVelocity = NMSHelper.getDeltaMovement(serverPlayer);
+            double vx = 0;
+            double vy = 0;
+            double vz = 0;
+            if (currentVelocity != null) {
+                vx = NMSHelper.getVec3X(currentVelocity);
+                vy = NMSHelper.getVec3Y(currentVelocity);
+                vz = NMSHelper.getVec3Z(currentVelocity);
+            }
 
+            boolean onGround = NMSHelper.onGround(serverPlayer);
+            boolean isNoGravity = NMSHelper.isNoGravity(serverPlayer);
+
+            if (!isNoGravity) {
+                if (!onGround) {
+                    vy -= 0.08;
+                    if (vy < -3.92) {
+                        vy = -3.92;
+                    }
+                }
+            }
+
+            double friction = onGround ? 0.546 : 0.98;
+            vx *= friction;
+            vz *= friction;
+
+            Object vec3Move = NMSHelper.createVec3(vx, vy, vz);
+            if (vec3Move != null) {
+                NMSHelper.move(serverPlayer, vec3Move);
+            }
+
+            Object postMoveVelocity = NMSHelper.getDeltaMovement(serverPlayer);
+            if (postMoveVelocity != null) {
+                double pvx = NMSHelper.getVec3X(postMoveVelocity);
+                double pvy = NMSHelper.getVec3Y(postMoveVelocity);
+                double pvz = NMSHelper.getVec3Z(postMoveVelocity);
+                if (NMSHelper.onGround(serverPlayer) && pvy < 0) {
+                    pvy = 0;
+                }
+                NMSHelper.setDeltaMovement(serverPlayer, NMSHelper.createVec3(pvx, pvy, pvz));
+            }
+
+            // Connection keepalive and ping tick updates
             if (connectionField != null) {
                 Object listener = connectionField.get(serverPlayer);
                 if (listener != null) {
@@ -123,6 +156,7 @@ public class BotNPC {
                 }
             }
 
+            // Head and body tracking to look at nearest player
             if (bukkitPlayer != null && bukkitPlayer.isOnline()) {
                 Player nearest = findNearestPlayer();
                 if (nearest != null) {
@@ -131,13 +165,13 @@ public class BotNPC {
                     double dx = targetLoc.getX() - botLoc.getX();
                     double dy = targetLoc.getY() - botLoc.getY();
                     double dz = targetLoc.getZ() - botLoc.getZ();
-                    double dist = Math.sqrt(dx * dx + dz * dz + dy * dy);
-                    if (dist > 0.001) {
+                    double dist = Math.sqrt(dx * dx + dz * dz);
+                    if (dist > 0.001 || Math.abs(dy) > 0.001) {
                         float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
                         float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
                         if (pitch > 90) pitch = 90;
                         if (pitch < -90) pitch = -90;
-                        NMSHelper.setRotation(serverPlayer, yaw, pitch);
+                        NMSHelper.setRotation(serverPlayer, yaw, pitch, yaw);
                     }
                 }
             }

@@ -18,6 +18,21 @@ public class BotManager {
         return bot;
     }
 
+    public void createBotAsync(String name, Location location, org.bukkit.plugin.Plugin plugin, java.util.function.Consumer<BotNPC> callback) {
+        org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            Object profile = NMSHelper.createProfileWithSkin(name, UUID.randomUUID());
+            UUID botUuid = profile != null ? NMSHelper.getProfileId(profile) : UUID.randomUUID();
+            org.bukkit.Bukkit.getScheduler().runTask(plugin, () -> {
+                BotNPC bot = new BotNPC(name, botUuid);
+                bot.spawn(location, profile);
+                bots.put(name.toLowerCase(), bot);
+                if (callback != null) {
+                    callback.accept(bot);
+                }
+            });
+        });
+    }
+
     public boolean removeBot(String name) {
         BotNPC bot = bots.remove(name.toLowerCase());
         if (bot != null) {
