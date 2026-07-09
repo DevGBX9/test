@@ -31,7 +31,7 @@ public class NMSHelper {
     private static Constructor<?> gameProfileConstructor;
 
     private static Method playerListPlaceNewPlayer;
-    private static boolean placeNewPlayerByType = false;
+    private static int placeNewPlayerSig = 0; // 0=unknown, 1=listener+player+cookie, 2=player+level+cookie, 3=conn+player+cookie
     private static Method playerListRemove;
     private static Field playerListPlayersField;
     private static Field playerListByNameField;
@@ -42,6 +42,8 @@ public class NMSHelper {
     private static Method entityManagerAdd;
 
     private static Method sendPacketMethod;
+    private static Method connectionSendMethod;
+    private static Field listenerConnectionField;
     private static Constructor<?> playerInfoPacketCtor;
     private static Constructor<?> addPlayerPacketCtor;
     private static Object playerInfoActionAdd;
@@ -212,8 +214,36 @@ public class NMSHelper {
                 }
             } catch (Exception ignored) {}
 
+            try {
+                Class<?> connCls2 = Class.forName("net.minecraft.network.Connection");
+                Class<?> packetCls2 = Class.forName("net.minecraft.network.protocol.Packet");
+                for (Method m : connCls2.getMethods()) {
+                    if ("send".equals(m.getName()) && m.getParameterCount() == 1 && packetCls2.isAssignableFrom(m.getParameterTypes()[0])) {
+                        connectionSendMethod = m;
+                        break;
+                    }
+                }
+                Class<?> listenerCls2 = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
+                for (Field f : listenerCls2.getFields()) {
+                    if ("connection".equals(f.getName())) {
+                        listenerConnectionField = f;
+                        break;
+                    }
+                }
+                if (listenerConnectionField == null) {
+                    for (Field f : listenerCls2.getDeclaredFields()) {
+                        if ("connection".equals(f.getName())) {
+                            f.setAccessible(true);
+                            listenerConnectionField = f;
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+
             Class<?> playerListCls = Class.forName("net.minecraft.server.players.PlayerList");
             playerListPlaceNewPlayer = null;
+            Class<?> conCls = Class.forName("net.minecraft.network.Connection");
             Class<?> sgpCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
             Class<?> spCls = Class.forName("net.minecraft.server.level.ServerPlayer");
             Class<?> slCls = Class.forName("net.minecraft.server.level.ServerLevel");
@@ -223,22 +253,16 @@ public class NMSHelper {
                 Class<?>[] pt = m.getParameterTypes();
                 Bukkit.getLogger().info("[Mineflayer] Found placeNewPlayer: " + m.getName() + "(" + java.util.Arrays.toString(pt) + ")");
                 if (pt.length == 3 && pt[0].isAssignableFrom(sgpCls) && pt[1].isAssignableFrom(spCls) && pt[2].isAssignableFrom(ccCls)) {
-                    m.setAccessible(true);
-                    playerListPlaceNewPlayer = m;
-                    placeNewPlayerByType = true;
-                    break;
+                    m.setAccessible(true); playerListPlaceNewPlayer = m; placeNewPlayerSig = 1; break;
                 }
                 if (pt.length == 3 && pt[0].isAssignableFrom(spCls) && pt[1].isAssignableFrom(slCls) && pt[2].isAssignableFrom(ccCls)) {
-                    m.setAccessible(true);
-                    playerListPlaceNewPlayer = m;
-                    placeNewPlayerByType = false;
-                    break;
+                    m.setAccessible(true); playerListPlaceNewPlayer = m; placeNewPlayerSig = 2; break;
+                }
+                if (pt.length == 3 && pt[0].isAssignableFrom(conCls) && pt[1].isAssignableFrom(spCls) && pt[2].isAssignableFrom(ccCls)) {
+                    m.setAccessible(true); playerListPlaceNewPlayer = m; placeNewPlayerSig = 3; break;
                 }
                 if (pt.length == 2 && pt[0].isAssignableFrom(spCls) && pt[1].isAssignableFrom(ccCls)) {
-                    m.setAccessible(true);
-                    playerListPlaceNewPlayer = m;
-                    placeNewPlayerByType = true;
-                    break;
+                    m.setAccessible(true); playerListPlaceNewPlayer = m; placeNewPlayerSig = 4; break;
                 }
             }
             if (playerListPlaceNewPlayer == null) playerListPlaceNewPlayer = findMethod(playerListCls, "addPlayer", 2);
@@ -439,12 +463,21 @@ public class NMSHelper {
 
             Object[][] combos;
             if (pc == 3) {
-                combos = new Object[][]{
-                    {listener, serverPlayer, cookie},
-                    {serverPlayer, serverLevel, cookie},
-                    {serverPlayer, cookie, listener},
-                    {cookie, serverPlayer, serverLevel},
-                };
+                if (placeNewPlayerSig == 1) {
+                    combos = new Object[][]{{listener, serverPlayer, cookie}};
+                } else if (placeNewPlayerSig == 2) {
+                    combos = new Object[][]{{serverPlayer, serverLevel, cookie}};
+                } else if (placeNewPlayerSig == 3) {
+                    combos = new Object[][]{{conn, serverPlayer, cookie}};
+                } else {
+                    combos = new Object[][]{
+                        {listener, serverPlayer, cookie},
+                        {serverPlayer, serverLevel, cookie},
+                        {conn, serverPlayer, cookie},
+                        {serverPlayer, cookie, listener},
+                        {cookie, serverPlayer, serverLevel},
+                    };
+                }
             } else if (pc == 2) {
                 combos = new Object[][]{
                     {serverPlayer, cookie},
@@ -505,6 +538,13 @@ public class NMSHelper {
         return serverPlayer;
     }
 
+    private static boolean isDoubleWorldAdd(Throwable t) {
+        if (t == null) return false;
+        String msg = t.getMessage();
+        if (msg != null && msg.contains("Double World add")) return true;
+        return isDoubleWorldAdd(t.getCause());
+    }
+
     public static void addEntityToLevel(Object serverLevel, Object serverPlayer, UUID uuid) {
         boolean added = false;
         if (serverLevelAddPlayer != null) {
@@ -512,8 +552,7 @@ public class NMSHelper {
                 serverLevelAddPlayer.invoke(serverLevel, serverPlayer);
                 added = true;
             } catch (Exception e) {
-                String msg = e.getMessage();
-                if (msg != null && msg.contains("Double World add")) {
+                if (isDoubleWorldAdd(e)) {
                     added = true;
                 }
             }
@@ -526,8 +565,7 @@ public class NMSHelper {
                 entityManagerAdd.invoke(em, serverPlayer);
                 added = true;
             } catch (Exception e) {
-                String msg = e.getMessage();
-                if (msg != null && msg.contains("Double World add")) {
+                if (isDoubleWorldAdd(e)) {
                     added = true;
                 }
             }
@@ -561,7 +599,6 @@ public class NMSHelper {
 
     public static void broadcastBotSpawn(Object serverPlayer) {
         if (serverPlayer == null) { Bukkit.getLogger().warning("[Mineflayer] broadcastBotSpawn: serverPlayer null"); return; }
-        if (sendPacketMethod == null) { Bukkit.getLogger().warning("[Mineflayer] broadcastBotSpawn: sendPacketMethod null"); return; }
         try {
             Object infoPacket = null;
             if (playerInfoPacketCtor != null && playerInfoActionAdd != null) {
@@ -581,17 +618,37 @@ public class NMSHelper {
                 int sent = 0;
                 for (Object viewer : allPlayers) {
                     if (viewer == serverPlayer) continue;
-                    Object conn = serverPlayerConnectionField.get(viewer);
-                    if (conn != null) {
-                        if (infoPacket != null) {
-                            Bukkit.getLogger().info("[Mineflayer] sendPacketMethod takes=" + sendPacketMethod.getParameterTypes()[0].getSimpleName() + " infoPacket=" + infoPacket.getClass().getSimpleName());
-                            sendPacketMethod.invoke(conn, infoPacket);
-                        }
-                        if (spawnPacket != null) {
-                            sendPacketMethod.invoke(conn, spawnPacket);
-                        }
-                        sent++;
+                    Object listener = serverPlayerConnectionField.get(viewer);
+                    if (listener == null) continue;
+                    Object rawConn = null;
+                    if (listenerConnectionField != null) {
+                        try { rawConn = listenerConnectionField.get(listener); } catch (Exception ignored) {}
                     }
+                    Object conn = rawConn != null ? rawConn : listener;
+
+                    Method sendMethod = null;
+                    if (rawConn != null && connectionSendMethod != null) {
+                        sendMethod = connectionSendMethod;
+                    } else if (sendPacketMethod != null) {
+                        sendMethod = sendPacketMethod;
+                    }
+                    if (sendMethod == null) continue;
+
+                    if (infoPacket != null) {
+                        try {
+                            sendMethod.invoke(conn, infoPacket);
+                        } catch (Exception e) {
+                            Bukkit.getLogger().warning("[Mineflayer] infoPacket send failed: " + e.getMessage());
+                        }
+                    }
+                    if (spawnPacket != null) {
+                        try {
+                            sendMethod.invoke(conn, spawnPacket);
+                        } catch (Exception e) {
+                            Bukkit.getLogger().warning("[Mineflayer] spawnPacket send failed: " + e.getMessage());
+                        }
+                    }
+                    sent++;
                 }
                 Bukkit.getLogger().info("[Mineflayer] broadcastBotSpawn: sent to " + sent + " players, total=" + allPlayers.size());
             } else {
