@@ -1,7 +1,5 @@
 package devgbx9.mineflayer;
 
-import com.mojang.authlib.GameProfile;
-import com.mojang.authlib.properties.Property;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 
@@ -47,6 +45,8 @@ public class NMSHelper {
     private static Constructor<?> addPlayerPacketCtor;
     private static Object playerInfoActionAdd;
 
+    private static Method gameProfileGetId;
+
     private static Object packetFlowServerbound;
     private static Constructor<?> connectionConstructor;
     private static Field connectionAddressField;
@@ -60,7 +60,9 @@ public class NMSHelper {
     private static Method entityGetYRot;
     private static Method entityGetXRot;
 
-
+    private static Constructor<?> propertyConstructor3;
+    private static Constructor<?> propertyConstructor2;
+    private static Method gameProfileGetProperties;
 
     public static boolean isAvailable() {
         return initialized;
@@ -223,6 +225,17 @@ public class NMSHelper {
                 } catch (NoSuchMethodException ignored2) {}
             }
 
+            try {
+                Class<?> propCls = Class.forName("com.mojang.authlib.properties.Property");
+                for (Constructor<?> c : propCls.getDeclaredConstructors()) {
+                    if (c.getParameterCount() == 3) { propertyConstructor3 = c; }
+                    if (c.getParameterCount() == 2) { propertyConstructor2 = c; }
+                }
+                Class<?> gpCls = Class.forName("com.mojang.authlib.GameProfile");
+                gameProfileGetProperties = gpCls.getMethod("getProperties");
+                gameProfileGetId = gpCls.getMethod("getId");
+            } catch (Exception ignored) {}
+
             initialized = true;
             Bukkit.getLogger().info("[Mineflayer] NMS ready");
         } catch (Exception e) {
@@ -230,8 +243,13 @@ public class NMSHelper {
         }
     }
 
-    public static GameProfile createProfileWithSkin(String name, UUID uuid) {
-        GameProfile profile = new GameProfile(uuid, name);
+    public static Object createProfileWithSkin(String name, UUID uuid) {
+        Object profile;
+        try {
+            profile = gameProfileConstructor.newInstance(uuid, name);
+        } catch (Exception e) {
+            return null;
+        }
 
         try {
             URL url = new URI("https://api.mojang.com/users/profiles/minecraft/" + name).toURL();
@@ -259,7 +277,7 @@ public class NMSHelper {
                     try (InputStream is2 = conn2.getInputStream()) {
                         json2 = new String(is2.readAllBytes());
                     }
-                    parseSkinProperties(json2, profile);
+                    parseSkinPropertiesReflect(json2, profile);
                 }
             }
         } catch (Exception ignored) {}
@@ -276,7 +294,9 @@ public class NMSHelper {
         return end == -1 ? null : json.substring(start, end);
     }
 
-    private static void parseSkinProperties(String json, GameProfile profile) {
+    @SuppressWarnings("unchecked")
+    private static void parseSkinPropertiesReflect(String json, Object profile) {
+        if (gameProfileGetProperties == null || (propertyConstructor2 == null && propertyConstructor3 == null)) return;
         String propsKey = "\"properties\":[";
         int propsStart = json.indexOf(propsKey);
         if (propsStart == -1) return;
@@ -284,33 +304,49 @@ public class NMSHelper {
 
         int depth = 0;
         int objStart = -1;
-        for (int i = propsStart; i < json.length(); i++) {
-            char c = json.charAt(i);
-            if (c == '{') {
-                if (depth == 0) objStart = i;
-                depth++;
-            } else if (c == '}') {
-                depth--;
-                if (depth == 0 && objStart != -1) {
-                    String obj = json.substring(objStart, i + 1);
-                    String pName = extractJsonString(obj, "name");
-                    String value = extractJsonString(obj, "value");
-                    if (pName != null && value != null) {
-                        String signature = extractJsonString(obj, "signature");
-                        if (signature != null) {
-                            profile.getProperties().put(pName, new Property(pName, value, signature));
-                        } else {
-                            profile.getProperties().put(pName, new Property(pName, value));
-                        }
-                    }
-                    objStart = -1;
+        try {
+            Object propMap = gameProfileGetProperties.invoke(profile);
+            Method putMethod = null;
+            for (Method m : propMap.getClass().getMethods()) {
+                if ("put".equals(m.getName()) && m.getParameterCount() == 2) {
+                    putMethod = m;
+                    break;
                 }
             }
-            if (c == ']' && depth == 0) break;
-        }
+            if (putMethod == null) return;
+
+            for (int i = propsStart; i < json.length(); i++) {
+                char c = json.charAt(i);
+                if (c == '{') {
+                    if (depth == 0) objStart = i;
+                    depth++;
+                } else if (c == '}') {
+                    depth--;
+                    if (depth == 0 && objStart != -1) {
+                        String obj = json.substring(objStart, i + 1);
+                        String pName = extractJsonString(obj, "name");
+                        String value = extractJsonString(obj, "value");
+                        if (pName != null && value != null) {
+                            String signature = extractJsonString(obj, "signature");
+                            Object property;
+                            if (signature != null && propertyConstructor3 != null) {
+                                property = propertyConstructor3.newInstance(pName, value, signature);
+                            } else if (propertyConstructor2 != null) {
+                                property = propertyConstructor2.newInstance(pName, value);
+                            } else {
+                                continue;
+                            }
+                            putMethod.invoke(propMap, pName, property);
+                        }
+                        objStart = -1;
+                    }
+                }
+                if (c == ']' && depth == 0) break;
+            }
+        } catch (Exception ignored) {}
     }
 
-    public static Object createAndJoinFakePlayer(String name, Location location, GameProfile profile) throws Exception {
+    public static Object createAndJoinFakePlayer(String name, Location location, Object profile) throws Exception {
         Object nmsServer = craftServerGetServer.invoke(Bukkit.getServer());
         Object serverLevel = craftWorldGetHandle.invoke(location.getWorld());
 
@@ -380,9 +416,11 @@ public class NMSHelper {
             if (playerListByUUIDField != null) {
                 @SuppressWarnings("unchecked")
                 Map<UUID, Object> byUUID = (Map<UUID, Object>) playerListByUUIDField.get(playerList);
-                byUUID.put(profile.getId(), serverPlayer);
+                UUID profileId = (UUID) gameProfileGetId.invoke(profile);
+                byUUID.put(profileId, serverPlayer);
             }
-            addEntityToLevel(serverLevel, serverPlayer, profile.getId());
+            UUID profileId = (UUID) gameProfileGetId.invoke(profile);
+            addEntityToLevel(serverLevel, serverPlayer, profileId);
         }
 
         return serverPlayer;
@@ -487,6 +525,11 @@ public class NMSHelper {
 
     public static org.bukkit.entity.Player toBukkitPlayer(Object serverPlayer) throws Exception {
         return (org.bukkit.entity.Player) serverPlayer.getClass().getMethod("getBukkitEntity").invoke(serverPlayer);
+    }
+
+    public static UUID getProfileId(Object profile) {
+        if (profile == null || gameProfileGetId == null) return UUID.randomUUID();
+        try { return (UUID) gameProfileGetId.invoke(profile); } catch (Exception e) { return UUID.randomUUID(); }
     }
 
     public static void setRotation(Object serverPlayer, float yaw, float pitch) {

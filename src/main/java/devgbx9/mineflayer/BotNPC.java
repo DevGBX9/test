@@ -1,6 +1,5 @@
 package devgbx9.mineflayer;
 
-import com.mojang.authlib.GameProfile;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -31,7 +30,7 @@ public class BotNPC {
     public Player getBukkitPlayer() { return bukkitPlayer; }
     public Object getServerPlayer() { return serverPlayer; }
 
-    public void spawn(Location location, GameProfile profile) {
+    public void spawn(Location location, Object profile) {
         if (alive) return;
         if (!NMSHelper.isAvailable()) {
             Bukkit.getLogger().severe("[Mineflayer] NMS unavailable");
