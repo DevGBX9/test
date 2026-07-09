@@ -31,6 +31,7 @@ public class NMSHelper {
     private static Constructor<?> gameProfileConstructor;
 
     private static Method playerListPlaceNewPlayer;
+    private static boolean placeNewPlayerByType = false;
     private static Method playerListRemove;
     private static Field playerListPlayersField;
     private static Field playerListByNameField;
@@ -193,16 +194,53 @@ public class NMSHelper {
             } catch (Exception ignored) {}
             try {
                 Class<?> sendListenerCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
+                Class<?> packetCls = Class.forName("net.minecraft.network.protocol.Packet");
                 for (Method m : sendListenerCls.getMethods()) {
-                    if ("send".equals(m.getName()) && m.getParameterCount() == 1) {
+                    if ("send".equals(m.getName()) && m.getParameterCount() == 1 && packetCls.isAssignableFrom(m.getParameterTypes()[0])) {
                         sendPacketMethod = m;
                         break;
+                    }
+                }
+                if (sendPacketMethod == null) {
+                    for (Method m : sendListenerCls.getMethods()) {
+                        if ("send".equals(m.getName()) && m.getParameterCount() == 1) {
+                            sendPacketMethod = m;
+                            Bukkit.getLogger().warning("[Mineflayer] sendPacketMethod fallback: " + m.getParameterTypes()[0].getName());
+                            break;
+                        }
                     }
                 }
             } catch (Exception ignored) {}
 
             Class<?> playerListCls = Class.forName("net.minecraft.server.players.PlayerList");
-            playerListPlaceNewPlayer = findMethod(playerListCls, "placeNewPlayer", 3);
+            playerListPlaceNewPlayer = null;
+            Class<?> sgpCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
+            Class<?> spCls = Class.forName("net.minecraft.server.level.ServerPlayer");
+            Class<?> slCls = Class.forName("net.minecraft.server.level.ServerLevel");
+            Class<?> ccCls = Class.forName("net.minecraft.server.network.CommonListenerCookie");
+            for (Method m : playerListCls.getDeclaredMethods()) {
+                if (!"placeNewPlayer".equals(m.getName())) continue;
+                Class<?>[] pt = m.getParameterTypes();
+                Bukkit.getLogger().info("[Mineflayer] Found placeNewPlayer: " + m.getName() + "(" + java.util.Arrays.toString(pt) + ")");
+                if (pt.length == 3 && pt[0].isAssignableFrom(sgpCls) && pt[1].isAssignableFrom(spCls) && pt[2].isAssignableFrom(ccCls)) {
+                    m.setAccessible(true);
+                    playerListPlaceNewPlayer = m;
+                    placeNewPlayerByType = true;
+                    break;
+                }
+                if (pt.length == 3 && pt[0].isAssignableFrom(spCls) && pt[1].isAssignableFrom(slCls) && pt[2].isAssignableFrom(ccCls)) {
+                    m.setAccessible(true);
+                    playerListPlaceNewPlayer = m;
+                    placeNewPlayerByType = false;
+                    break;
+                }
+                if (pt.length == 2 && pt[0].isAssignableFrom(spCls) && pt[1].isAssignableFrom(ccCls)) {
+                    m.setAccessible(true);
+                    playerListPlaceNewPlayer = m;
+                    placeNewPlayerByType = true;
+                    break;
+                }
+            }
             if (playerListPlaceNewPlayer == null) playerListPlaceNewPlayer = findMethod(playerListCls, "addPlayer", 2);
             if (playerListPlaceNewPlayer == null) playerListPlaceNewPlayer = findMethod(playerListCls, "add", 1);
             playerListRemove = findMethod(playerListCls, "remove", 1);
@@ -392,28 +430,50 @@ public class NMSHelper {
 
         boolean placedNormally = false;
         if (playerListPlaceNewPlayer != null) {
-            try {
-                int pc = playerListPlaceNewPlayer.getParameterCount();
-                Bukkit.getLogger().info("[Mineflayer] placeNewPlayer paramCount=" + pc);
-                Object[] args;
-                if (pc == 3 && listener != null && cookie != null) {
-                    args = new Object[]{listener, serverPlayer, cookie};
-                } else if (pc == 2) {
-                    args = new Object[]{serverPlayer, cookie};
-                } else if (pc == 1) {
-                    args = new Object[]{serverPlayer};
-                } else {
-                    args = null;
+            int pc = playerListPlaceNewPlayer.getParameterCount();
+            Class<?>[] paramTypes = playerListPlaceNewPlayer.getParameterTypes();
+            StringBuilder sb = new StringBuilder("[Mineflayer] placeNewPlayer paramCount=" + pc + " types=[");
+            for (int i = 0; i < pc; i++) { if (i > 0) sb.append(","); sb.append(paramTypes[i].getSimpleName()); }
+            sb.append("]");
+            Bukkit.getLogger().info(sb.toString());
+
+            Object[][] combos;
+            if (pc == 3) {
+                combos = new Object[][]{
+                    {listener, serverPlayer, cookie},
+                    {serverPlayer, serverLevel, cookie},
+                    {serverPlayer, cookie, listener},
+                    {cookie, serverPlayer, serverLevel},
+                };
+            } else if (pc == 2) {
+                combos = new Object[][]{
+                    {serverPlayer, cookie},
+                    {cookie, serverPlayer},
+                    {serverPlayer, listener},
+                };
+            } else if (pc == 1) {
+                combos = new Object[][]{{serverPlayer}, {cookie}, {listener}};
+            } else {
+                combos = new Object[0][];
+            }
+
+            for (Object[] args : combos) {
+                boolean match = true;
+                for (int i = 0; i < pc; i++) {
+                    if (args[i] != null && !paramTypes[i].isInstance(args[i])) {
+                        match = false;
+                        break;
+                    }
                 }
-                if (args != null) {
+                if (!match) continue;
+                try {
                     playerListPlaceNewPlayer.invoke(playerList, args);
                     placedNormally = true;
                     Bukkit.getLogger().info("[Mineflayer] placeNewPlayer succeeded");
-                } else {
-                    Bukkit.getLogger().warning("[Mineflayer] args null (pc=" + pc + " listener=" + (listener != null) + " cookie=" + (cookie != null) + ")");
+                    break;
+                } catch (Exception e) {
+                    Bukkit.getLogger().warning("[Mineflayer] placeNewPlayer combo failed: " + e.getMessage());
                 }
-            } catch (Exception e) {
-                Bukkit.getLogger().warning("[Mineflayer] placeNewPlayer failed: " + e.getMessage());
             }
         } else {
             Bukkit.getLogger().warning("[Mineflayer] placeNewPlayer method not found");
@@ -451,7 +511,12 @@ public class NMSHelper {
             try {
                 serverLevelAddPlayer.invoke(serverLevel, serverPlayer);
                 added = true;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                String msg = e.getMessage();
+                if (msg != null && msg.contains("Double World add")) {
+                    added = true;
+                }
+            }
         }
         if (!added && entityManagerAdd != null) {
             try {
@@ -460,7 +525,12 @@ public class NMSHelper {
                 Object em = emf.get(serverLevel);
                 entityManagerAdd.invoke(em, serverPlayer);
                 added = true;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                String msg = e.getMessage();
+                if (msg != null && msg.contains("Double World add")) {
+                    added = true;
+                }
+            }
         }
         if (!added) {
             if (levelEntityByUuid != null) {
@@ -513,8 +583,13 @@ public class NMSHelper {
                     if (viewer == serverPlayer) continue;
                     Object conn = serverPlayerConnectionField.get(viewer);
                     if (conn != null) {
-                        if (infoPacket != null) sendPacketMethod.invoke(conn, infoPacket);
-                        if (spawnPacket != null) sendPacketMethod.invoke(conn, spawnPacket);
+                        if (infoPacket != null) {
+                            Bukkit.getLogger().info("[Mineflayer] sendPacketMethod takes=" + sendPacketMethod.getParameterTypes()[0].getSimpleName() + " infoPacket=" + infoPacket.getClass().getSimpleName());
+                            sendPacketMethod.invoke(conn, infoPacket);
+                        }
+                        if (spawnPacket != null) {
+                            sendPacketMethod.invoke(conn, spawnPacket);
+                        }
                         sent++;
                     }
                 }
