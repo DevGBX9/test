@@ -366,20 +366,27 @@ public class NMSHelper {
                     Class<?> ecCls = Class.forName("io.netty.channel.embedded.EmbeddedChannel");
                     connectionChannelField.set(conn, ecCls.getDeclaredConstructor().newInstance());
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                Bukkit.getLogger().warning("[Mineflayer] conn failed: " + e.getMessage());
+            }
         }
 
         Object cookie = null;
         if (cookieCreateInitial != null) {
-            try { cookie = cookieCreateInitial.invoke(null, profile, false); } catch (Exception ignored) {}
+            try { cookie = cookieCreateInitial.invoke(null, profile, false); } catch (Exception e) {
+                Bukkit.getLogger().warning("[Mineflayer] cookie failed: " + e.getMessage());
+            }
         }
         Object listener = null;
         if (conn != null && serverPlayerConnectionField != null && gamePacketListenerConstructor != null && cookie != null) {
             try {
                 listener = gamePacketListenerConstructor.newInstance(nmsServer, conn, serverPlayer, cookie);
                 serverPlayerConnectionField.set(serverPlayer, listener);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                Bukkit.getLogger().warning("[Mineflayer] listener failed: " + e.getMessage());
+            }
         }
+        Bukkit.getLogger().info("[Mineflayer] conn=" + (conn != null) + " listener=" + (listener != null) + " cookie=" + (cookie != null) + " connField=" + (serverPlayerConnectionField != null));
 
         Object playerList = minecraftServerGetPlayerList.invoke(nmsServer);
 
@@ -387,6 +394,7 @@ public class NMSHelper {
         if (playerListPlaceNewPlayer != null) {
             try {
                 int pc = playerListPlaceNewPlayer.getParameterCount();
+                Bukkit.getLogger().info("[Mineflayer] placeNewPlayer paramCount=" + pc);
                 Object[] args;
                 if (pc == 3 && listener != null && cookie != null) {
                     args = new Object[]{listener, serverPlayer, cookie};
@@ -400,11 +408,19 @@ public class NMSHelper {
                 if (args != null) {
                     playerListPlaceNewPlayer.invoke(playerList, args);
                     placedNormally = true;
+                    Bukkit.getLogger().info("[Mineflayer] placeNewPlayer succeeded");
+                } else {
+                    Bukkit.getLogger().warning("[Mineflayer] args null (pc=" + pc + " listener=" + (listener != null) + " cookie=" + (cookie != null) + ")");
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                Bukkit.getLogger().warning("[Mineflayer] placeNewPlayer failed: " + e.getMessage());
+            }
+        } else {
+            Bukkit.getLogger().warning("[Mineflayer] placeNewPlayer method not found");
         }
 
             if (!placedNormally) {
+            Bukkit.getLogger().info("[Mineflayer] Using fallback PlayerList registration");
             UUID profileId = (gameProfileGetId != null && profile != null)
                 ? (UUID) gameProfileGetId.invoke(profile) : UUID.randomUUID();
 
@@ -474,7 +490,8 @@ public class NMSHelper {
     }
 
     public static void broadcastBotSpawn(Object serverPlayer) {
-        if (serverPlayer == null || sendPacketMethod == null) return;
+        if (serverPlayer == null) { Bukkit.getLogger().warning("[Mineflayer] broadcastBotSpawn: serverPlayer null"); return; }
+        if (sendPacketMethod == null) { Bukkit.getLogger().warning("[Mineflayer] broadcastBotSpawn: sendPacketMethod null"); return; }
         try {
             Object infoPacket = null;
             if (playerInfoPacketCtor != null && playerInfoActionAdd != null) {
@@ -491,16 +508,23 @@ public class NMSHelper {
             if (playerListPlayersField != null) {
                 @SuppressWarnings("unchecked")
                 List<Object> allPlayers = (List<Object>) playerListPlayersField.get(playerList);
+                int sent = 0;
                 for (Object viewer : allPlayers) {
                     if (viewer == serverPlayer) continue;
                     Object conn = serverPlayerConnectionField.get(viewer);
                     if (conn != null) {
                         if (infoPacket != null) sendPacketMethod.invoke(conn, infoPacket);
                         if (spawnPacket != null) sendPacketMethod.invoke(conn, spawnPacket);
+                        sent++;
                     }
                 }
+                Bukkit.getLogger().info("[Mineflayer] broadcastBotSpawn: sent to " + sent + " players, total=" + allPlayers.size());
+            } else {
+                Bukkit.getLogger().warning("[Mineflayer] broadcastBotSpawn: playerListPlayersField null");
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            Bukkit.getLogger().warning("[Mineflayer] broadcastBotSpawn error: " + e.getMessage());
+        }
     }
 
     public static void nativeKnockback(Object serverPlayer, double strength, double x, double z) {

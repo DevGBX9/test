@@ -61,7 +61,8 @@ public class BotNPC {
             Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' spawned");
             alive = true;
         } catch (Exception e) {
-            Bukkit.getLogger().warning("[Mineflayer] spawn failed: " + e.getMessage());
+            Bukkit.getLogger().severe("[Mineflayer] spawn failed: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
