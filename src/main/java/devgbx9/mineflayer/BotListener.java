@@ -1,8 +1,7 @@
 package devgbx9.mineflayer;
 
 import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.entity.Player;
+import org.bukkit.entity.Entity;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -19,8 +18,7 @@ public class BotListener implements Listener {
 
     @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
-        Player player = event.getPlayer();
-        BotNPC bot = botManager.getBotByPlayer(player);
+        BotNPC bot = botManager.getBotByPlayer(event.getPlayer());
         if (bot != null) {
             String name = bot.getName();
             botManager.removeBot(name);
@@ -30,14 +28,13 @@ public class BotListener implements Listener {
 
     @EventHandler
     public void onEntityDamage(EntityDamageByEntityEvent event) {
-        if (!(event.getEntity() instanceof Player)) return;
-        BotNPC bot = botManager.getBotByPlayer((Player) event.getEntity());
+        if (!(event.getEntity() instanceof org.bukkit.entity.Player victim)) return;
+        BotNPC bot = botManager.getBotByPlayer(victim);
         if (bot == null) return;
-        if (!(event.getDamager() instanceof Player)) return;
 
-        Player attacker = (Player) event.getDamager();
-        double dx = bot.getBukkitPlayer().getX() - attacker.getX();
-        double dz = bot.getBukkitPlayer().getZ() - attacker.getZ();
+        Entity damager = event.getDamager();
+        double dx = victim.getX() - damager.getX();
+        double dz = victim.getZ() - damager.getZ();
         double dist = Math.hypot(dx, dz);
         if (dist > 0.001) {
             dx /= dist;
@@ -48,8 +45,7 @@ public class BotListener implements Listener {
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
-        Player player = event.getPlayer();
-        BotNPC bot = botManager.getBotByPlayer(player);
+        BotNPC bot = botManager.getBotByPlayer(event.getPlayer());
         if (bot != null) {
             String name = bot.getName();
             if (botManager.exists(name)) {

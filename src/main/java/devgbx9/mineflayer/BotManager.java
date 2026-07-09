@@ -1,5 +1,6 @@
 package devgbx9.mineflayer;
 
+import com.mojang.authlib.GameProfile;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
@@ -10,8 +11,9 @@ public class BotManager {
     private final Map<String, BotNPC> bots = new HashMap<>();
 
     public BotNPC createBot(String name, Location location) {
-        BotNPC bot = new BotNPC(name, UUID.randomUUID());
-        bot.spawn(location);
+        GameProfile profile = NMSHelper.createProfileWithSkin(name, UUID.randomUUID());
+        BotNPC bot = new BotNPC(name, profile.getId());
+        bot.spawn(location, profile);
         bots.put(name.toLowerCase(), bot);
         return bot;
     }

@@ -26,7 +26,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
 
         startTickTask();
 
-        getLogger().info(getName() + " v" + getPluginMeta().getVersion() + " enabled!");
+        getLogger().info(getName() + " v" + getPluginMeta().getVersion() + " enabled");
     }
 
     @Override
@@ -34,7 +34,6 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
         if (botManager != null) {
             botManager.removeAll();
         }
-        getLogger().info(getName() + " disabled!");
     }
 
     private void startTickTask() {
@@ -75,7 +74,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
 
                 Location spawnLoc = player.getLocation();
                 botManager.createBot(name, spawnLoc);
-                sender.sendMessage("§aBot '" + name + "' spawned.");
+                sender.sendMessage("§aBot '" + name + "' spawned with skin.");
                 getLogger().info("Bot '" + name + "' spawned by " + player.getName());
                 return true;
             }
@@ -87,7 +86,6 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                 String name = args[1];
                 if (botManager.removeBot(name)) {
                     sender.sendMessage("§aBot '" + name + "' removed.");
-                    getLogger().info("Bot '" + name + "' removed.");
                 } else {
                     sender.sendMessage("§cBot '" + name + "' not found.");
                 }
@@ -102,15 +100,13 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
         if (args.length == 1) {
             return List.of("add", "delete");
         }
-        if (args.length == 2) {
+        if (args.length == 2 && args[0].equalsIgnoreCase("delete")) {
             String prefix = args[1].toLowerCase();
-            if (args[0].equalsIgnoreCase("delete")) {
-                List<String> result = new ArrayList<>();
-                for (String n : botManager.getBotNames()) {
-                    if (n.toLowerCase().startsWith(prefix)) result.add(n);
-                }
-                return result;
+            List<String> result = new ArrayList<>();
+            for (String n : botManager.getBotNames()) {
+                if (n.toLowerCase().startsWith(prefix)) result.add(n);
             }
+            return result;
         }
         return new ArrayList<>();
     }

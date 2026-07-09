@@ -1,13 +1,18 @@
 package devgbx9.mineflayer;
 
+import com.mojang.authlib.GameProfile;
+import com.mojang.authlib.properties.Property;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.entity.Player;
 
+import java.io.InputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.net.InetSocketAddress;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URL;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -15,7 +20,6 @@ import java.util.UUID;
 public class NMSHelper {
 
     private static boolean initialized = false;
-    private static String cbPackage;
 
     private static Method craftServerGetServer;
     private static Method craftWorldGetHandle;
@@ -37,7 +41,6 @@ public class NMSHelper {
     private static Field levelEntityByUuid;
     private static Field levelEntitiesById;
     private static Method entityManagerAdd;
-    private static Object entityManager;
 
     private static Method sendPacketMethod;
     private static Constructor<?> playerInfoPacketCtor;
@@ -48,10 +51,16 @@ public class NMSHelper {
     private static Constructor<?> connectionConstructor;
     private static Field connectionAddressField;
     private static Field connectionChannelField;
-    private static Object unsafe;
     private static Constructor<?> gamePacketListenerConstructor;
     private static Method cookieCreateInitial;
     private static Field serverPlayerConnectionField;
+
+    private static Method entitySetYRot;
+    private static Method entitySetXRot;
+    private static Method entityGetYRot;
+    private static Method entityGetXRot;
+
+
 
     public static boolean isAvailable() {
         return initialized;
@@ -60,7 +69,7 @@ public class NMSHelper {
     public static void init() {
         if (initialized) return;
         try {
-            cbPackage = Bukkit.getServer().getClass().getPackage().getName();
+            String cbPackage = Bukkit.getServer().getClass().getPackage().getName();
 
             Class<?> craftServerCls = resolveClass(cbPackage + ".CraftServer", "org.bukkit.craftbukkit.CraftServer");
             Class<?> craftWorldCls = resolveClass(cbPackage + ".CraftWorld", "org.bukkit.craftbukkit.CraftWorld");
@@ -74,10 +83,9 @@ public class NMSHelper {
             Class<?> serverPlayerCls = Class.forName("net.minecraft.server.level.ServerPlayer");
             serverPlayerConstructor = findConstructor(serverPlayerCls, 4);
 
-            Class<?> serverLevelCls2 = Class.forName("net.minecraft.server.level.ServerLevel");
+            Class<?> serverLevelCls = Class.forName("net.minecraft.server.level.ServerLevel");
             Class<?> entityCls = Class.forName("net.minecraft.world.entity.Entity");
-            // Try declared + public methods (addEntity is inherited from Level)
-            for (Method m : serverLevelCls2.getMethods()) {
+            for (Method m : serverLevelCls.getMethods()) {
                 String n = m.getName();
                 Class<?>[] p = m.getParameterTypes();
                 if (p.length == 1 && ("addEntity".equals(n) || "addFreshEntity".equals(n))) {
@@ -88,7 +96,7 @@ public class NMSHelper {
                 }
             }
             if (serverLevelAddPlayer == null) {
-                for (Method m : serverLevelCls2.getDeclaredMethods()) {
+                for (Method m : serverLevelCls.getDeclaredMethods()) {
                     String n = m.getName();
                     Class<?>[] p = m.getParameterTypes();
                     if (p.length == 1 && ("addNewPlayer".equals(n) || "addPlayer".equals(n))) {
@@ -101,21 +109,17 @@ public class NMSHelper {
                 }
             }
 
-            // Fallback: direct entity map access for natural ticking
-            String[] uuidFieldNames = {"entityByUuid", "entitiesByUUID", "uuidMap"};
-            for (String fn : uuidFieldNames) {
-                levelEntityByUuid = getAccessibleField(serverLevelCls2, fn);
+            for (String fn : new String[]{"entityByUuid", "entitiesByUUID", "uuidMap"}) {
+                levelEntityByUuid = getAccessibleField(serverLevelCls, fn);
                 if (levelEntityByUuid != null) break;
             }
-            String[] idFieldNames = {"entitiesById", "entityById", "idMap"};
-            for (String fn : idFieldNames) {
-                levelEntitiesById = getAccessibleField(serverLevelCls2, fn);
+            for (String fn : new String[]{"entitiesById", "entityById", "idMap"}) {
+                levelEntitiesById = getAccessibleField(serverLevelCls, fn);
                 if (levelEntitiesById != null) break;
             }
 
-            // Entity manager fallback (handles tracker + ticking)
-            Field emField = getAccessibleField(serverLevelCls2, "entityManager");
-            if (emField == null) emField = findFieldByType(serverLevelCls2, "PersistentEntitySectionManager");
+            Field emField = getAccessibleField(serverLevelCls, "entityManager");
+            if (emField == null) emField = findFieldByType(serverLevelCls, "PersistentEntitySectionManager");
             if (emField != null) {
                 for (Method m : emField.getType().getMethods()) {
                     if ("addEntity".equals(m.getName()) && m.getParameterCount() == 1) {
@@ -129,8 +133,7 @@ public class NMSHelper {
             Class<?> clientInfoCls = Class.forName("net.minecraft.server.level.ClientInformation");
             clientInformationCreateDefault = clientInfoCls.getMethod("createDefault");
 
-            Class<?> gpClass = Class.forName("com.mojang.authlib.GameProfile");
-            gameProfileConstructor = gpClass.getConstructor(UUID.class, String.class);
+            gameProfileConstructor = findConstructor(Class.forName("com.mojang.authlib.GameProfile"), 2);
 
             Class<?> packetFlowCls = resolveClass("net.minecraft.network.PacketFlow", "net.minecraft.network.protocol.PacketFlow");
             if (packetFlowCls != null) {
@@ -151,12 +154,6 @@ public class NMSHelper {
             }
             connectionAddressField = getAccessibleField(connectionCls, "address");
             connectionChannelField = getAccessibleField(connectionCls, "channel");
-            try {
-                Class<?> u = Class.forName("sun.misc.Unsafe");
-                Field f = u.getDeclaredField("theUnsafe");
-                f.setAccessible(true);
-                unsafe = f.get(null);
-            } catch (Exception ignored) {}
 
             Class<?> listenerCls = Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl");
             Class<?> cookieCls = Class.forName("net.minecraft.server.network.CommonListenerCookie");
@@ -164,7 +161,6 @@ public class NMSHelper {
             gamePacketListenerConstructor = findConstructor(listenerCls, 4);
             serverPlayerConnectionField = findFieldByType(serverPlayerCls, "ServerGamePacketListenerImpl");
 
-            // Find packet classes for bot visibility broadcasting
             try {
                 Class<?> infoPacketCls = Class.forName("net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket");
                 for (Constructor<?> c : infoPacketCls.getDeclaredConstructors()) {
@@ -204,14 +200,28 @@ public class NMSHelper {
             } catch (Exception ignored) {}
 
             Class<?> playerListCls = Class.forName("net.minecraft.server.players.PlayerList");
-        playerListPlaceNewPlayer = findMethod(playerListCls, "placeNewPlayer", 3);
-        if (playerListPlaceNewPlayer == null) playerListPlaceNewPlayer = findMethod(playerListCls, "addPlayer", 2);
-        if (playerListPlaceNewPlayer == null) playerListPlaceNewPlayer = findMethod(playerListCls, "add", 1);
-        playerListRemove = findMethod(playerListCls, "remove", 1);
+            playerListPlaceNewPlayer = findMethod(playerListCls, "placeNewPlayer", 3);
+            if (playerListPlaceNewPlayer == null) playerListPlaceNewPlayer = findMethod(playerListCls, "addPlayer", 2);
+            if (playerListPlaceNewPlayer == null) playerListPlaceNewPlayer = findMethod(playerListCls, "add", 1);
+            playerListRemove = findMethod(playerListCls, "remove", 1);
             playerListPlayersField = getAccessibleField(playerListCls, "players");
             if (playerListPlayersField == null) playerListPlayersField = findListField(playerListCls);
             playerListByNameField = getAccessibleField(playerListCls, "playersByName");
             playerListByUUIDField = getAccessibleField(playerListCls, "playersByUUID");
+
+            try {
+                entitySetYRot = entityCls.getMethod("setYRot", float.class);
+                entitySetXRot = entityCls.getMethod("setXRot", float.class);
+                entityGetYRot = entityCls.getMethod("getYRot");
+                entityGetXRot = entityCls.getMethod("getXRot");
+            } catch (NoSuchMethodException e) {
+                try {
+                    entitySetYRot = entityCls.getMethod("setYaw", float.class);
+                    entitySetXRot = entityCls.getMethod("setPitch", float.class);
+                    entityGetYRot = entityCls.getMethod("getYaw");
+                    entityGetXRot = entityCls.getMethod("getPitch");
+                } catch (NoSuchMethodException ignored2) {}
+            }
 
             initialized = true;
             Bukkit.getLogger().info("[Mineflayer] NMS ready");
@@ -220,21 +230,99 @@ public class NMSHelper {
         }
     }
 
-    public static Object createAndJoinFakePlayer(String name, UUID uuid, Location location) throws Exception {
+    public static GameProfile createProfileWithSkin(String name, UUID uuid) {
+        GameProfile profile = new GameProfile(uuid, name);
+
+        try {
+            URL url = new URI("https://api.mojang.com/users/profiles/minecraft/" + name).toURL();
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            conn.setRequestProperty("User-Agent", "Mineflayer");
+
+            if (conn.getResponseCode() == 200) {
+                String json;
+                try (InputStream is = conn.getInputStream()) {
+                    json = new String(is.readAllBytes());
+                }
+                String realUuid = extractJsonString(json, "id");
+                if (realUuid == null) return profile;
+
+                URL sessionUrl = new URI("https://sessionserver.mojang.com/session/minecraft/profile/" + realUuid).toURL();
+                HttpURLConnection conn2 = (HttpURLConnection) sessionUrl.openConnection();
+                conn2.setConnectTimeout(5000);
+                conn2.setReadTimeout(5000);
+                conn2.setRequestProperty("User-Agent", "Mineflayer");
+
+                if (conn2.getResponseCode() == 200) {
+                    String json2;
+                    try (InputStream is2 = conn2.getInputStream()) {
+                        json2 = new String(is2.readAllBytes());
+                    }
+                    parseSkinProperties(json2, profile);
+                }
+            }
+        } catch (Exception ignored) {}
+
+        return profile;
+    }
+
+    private static String extractJsonString(String json, String key) {
+        String search = "\"" + key + "\":\"";
+        int start = json.indexOf(search);
+        if (start == -1) return null;
+        start += search.length();
+        int end = json.indexOf("\"", start);
+        return end == -1 ? null : json.substring(start, end);
+    }
+
+    private static void parseSkinProperties(String json, GameProfile profile) {
+        String propsKey = "\"properties\":[";
+        int propsStart = json.indexOf(propsKey);
+        if (propsStart == -1) return;
+        propsStart += propsKey.length();
+
+        int depth = 0;
+        int objStart = -1;
+        for (int i = propsStart; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (c == '{') {
+                if (depth == 0) objStart = i;
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0 && objStart != -1) {
+                    String obj = json.substring(objStart, i + 1);
+                    String pName = extractJsonString(obj, "name");
+                    String value = extractJsonString(obj, "value");
+                    if (pName != null && value != null) {
+                        String signature = extractJsonString(obj, "signature");
+                        if (signature != null) {
+                            profile.getProperties().put(pName, new Property(pName, value, signature));
+                        } else {
+                            profile.getProperties().put(pName, new Property(pName, value));
+                        }
+                    }
+                    objStart = -1;
+                }
+            }
+            if (c == ']' && depth == 0) break;
+        }
+    }
+
+    public static Object createAndJoinFakePlayer(String name, Location location, GameProfile profile) throws Exception {
         Object nmsServer = craftServerGetServer.invoke(Bukkit.getServer());
         Object serverLevel = craftWorldGetHandle.invoke(location.getWorld());
 
-        Object profile = gameProfileConstructor.newInstance(uuid, name);
         Object clientInfo = clientInformationCreateDefault.invoke(null);
         Object serverPlayer = serverPlayerConstructor.newInstance(nmsServer, serverLevel, profile, clientInfo);
 
-        // Create fake connection (prevents NPE in server tick)
         Object conn = null;
         if (packetFlowServerbound != null && connectionConstructor != null) {
             try {
                 conn = connectionConstructor.newInstance(packetFlowServerbound);
                 if (connectionAddressField != null) {
-                    connectionAddressField.set(conn, new InetSocketAddress("127.0.0.1", 0));
+                    connectionAddressField.set(conn, new java.net.InetSocketAddress("127.0.0.1", 0));
                 }
                 if (connectionChannelField != null) {
                     Class<?> ecCls = Class.forName("io.netty.channel.embedded.EmbeddedChannel");
@@ -243,7 +331,6 @@ public class NMSHelper {
             } catch (Exception ignored) {}
         }
 
-        // Create fake packet listener (required for connection to work)
         Object cookie = null;
         if (cookieCreateInitial != null) {
             try { cookie = cookieCreateInitial.invoke(null, profile, false); } catch (Exception ignored) {}
@@ -258,7 +345,6 @@ public class NMSHelper {
 
         Object playerList = minecraftServerGetPlayerList.invoke(nmsServer);
 
-        // Try PlayerList registration methods (handles all registration including tracker + visibility)
         boolean placedNormally = false;
         if (playerListPlaceNewPlayer != null) {
             try {
@@ -281,7 +367,6 @@ public class NMSHelper {
         }
 
         if (!placedNormally) {
-            // Manual PlayerList registration fallback
             if (playerListPlayersField != null) {
                 @SuppressWarnings("unchecked")
                 List<Object> players = (List<Object>) playerListPlayersField.get(playerList);
@@ -295,37 +380,32 @@ public class NMSHelper {
             if (playerListByUUIDField != null) {
                 @SuppressWarnings("unchecked")
                 Map<UUID, Object> byUUID = (Map<UUID, Object>) playerListByUUIDField.get(playerList);
-                byUUID.put(uuid, serverPlayer);
+                byUUID.put(profile.getId(), serverPlayer);
             }
-
-            // Try to add entity to level (tracker + ticking) - may fail if chunk not loaded
-            addEntityToLevel(serverLevel, serverPlayer, uuid);
+            addEntityToLevel(serverLevel, serverPlayer, profile.getId());
         }
 
         return serverPlayer;
     }
 
     public static void addEntityToLevel(Object serverLevel, Object serverPlayer, UUID uuid) {
-        boolean addedToLevel = false;
+        boolean added = false;
         if (serverLevelAddPlayer != null) {
             try {
                 serverLevelAddPlayer.invoke(serverLevel, serverPlayer);
-                addedToLevel = true;
+                added = true;
             } catch (Exception ignored) {}
         }
-
-        if (!addedToLevel && entityManagerAdd != null) {
+        if (!added && entityManagerAdd != null) {
             try {
                 Field emf = serverLevel.getClass().getDeclaredField("entityManager");
                 emf.setAccessible(true);
                 Object em = emf.get(serverLevel);
                 entityManagerAdd.invoke(em, serverPlayer);
-                addedToLevel = true;
+                added = true;
             } catch (Exception ignored) {}
         }
-
-        if (!addedToLevel) {
-            // Fallback: directly register entity in the world's internal maps for ticking
+        if (!added) {
             if (levelEntityByUuid != null) {
                 try {
                     @SuppressWarnings("unchecked")
@@ -353,23 +433,18 @@ public class NMSHelper {
     }
 
     public static void broadcastBotSpawn(Object serverPlayer) {
-        if (serverPlayer == null) return;
-        if (sendPacketMethod == null) return;
+        if (serverPlayer == null || sendPacketMethod == null) return;
         try {
-            // Create player info packet (adds to tab list)
             Object infoPacket = null;
             if (playerInfoPacketCtor != null && playerInfoActionAdd != null) {
-                Object actionSet = java.util.EnumSet.of((Enum) playerInfoActionAdd);
+                Object actionSet = EnumSet.of((Enum) playerInfoActionAdd);
                 infoPacket = playerInfoPacketCtor.newInstance(actionSet, java.util.Collections.singletonList(serverPlayer));
             }
-
-            // Create spawn player packet
             Object spawnPacket = null;
             if (addPlayerPacketCtor != null) {
                 spawnPacket = addPlayerPacketCtor.newInstance(serverPlayer);
             }
 
-            // Send to all online players
             Object nmsServer = craftServerGetServer.invoke(Bukkit.getServer());
             Object playerList = minecraftServerGetPlayerList.invoke(nmsServer);
             if (playerListPlayersField != null) {
@@ -395,18 +470,9 @@ public class NMSHelper {
         } catch (Exception ignored) {}
     }
 
-    public static void broadcastJoinMessage(String name) {
-        Bukkit.broadcastMessage("§e" + name + " joined the game");
-    }
-
-    public static void broadcastLeaveMessage(String name) {
-        Bukkit.broadcastMessage("§e" + name + " left the game");
-    }
-
     public static boolean removeFakePlayer(Object serverPlayer) throws Exception {
         Object nmsServer = craftServerGetServer.invoke(Bukkit.getServer());
         Object playerList = minecraftServerGetPlayerList.invoke(nmsServer);
-
         if (playerListRemove != null) {
             playerListRemove.invoke(playerList, serverPlayer);
             return true;
@@ -419,8 +485,31 @@ public class NMSHelper {
         return false;
     }
 
-    public static Player toBukkitPlayer(Object serverPlayer) throws Exception {
-        return (Player) serverPlayer.getClass().getMethod("getBukkitEntity").invoke(serverPlayer);
+    public static org.bukkit.entity.Player toBukkitPlayer(Object serverPlayer) throws Exception {
+        return (org.bukkit.entity.Player) serverPlayer.getClass().getMethod("getBukkitEntity").invoke(serverPlayer);
+    }
+
+    public static void setRotation(Object serverPlayer, float yaw, float pitch) {
+        if (entitySetYRot != null && entitySetXRot != null) {
+            try {
+                entitySetYRot.invoke(serverPlayer, yaw);
+                entitySetXRot.invoke(serverPlayer, pitch);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    public static float getYaw(Object serverPlayer) {
+        if (entityGetYRot != null) {
+            try { return (float) entityGetYRot.invoke(serverPlayer); } catch (Exception ignored) {}
+        }
+        return 0;
+    }
+
+    public static float getPitch(Object serverPlayer) {
+        if (entityGetXRot != null) {
+            try { return (float) entityGetXRot.invoke(serverPlayer); } catch (Exception ignored) {}
+        }
+        return 0;
     }
 
     private static Class<?> resolveClass(String... names) {
