@@ -29,6 +29,9 @@ public class BotNPC {
     private Field lastReceivedTimeField;
     private boolean keepAliveCached = false;
 
+    // Fall damage tracking
+    private double highestY = -1;
+
     public BotNPC(String name, UUID uuid) {
         this.name = name;
         this.uuid = uuid;
@@ -144,22 +147,56 @@ public class BotNPC {
                 manualPhysicsFallback();
             }
 
+            // === Fall Damage Logic ===
+            double currentY = bukkitPlayer.getLocation().getY();
+            org.bukkit.block.Block currentBlock = bukkitPlayer.getLocation().getBlock();
+            boolean isLiquidOrCobweb = currentBlock.isLiquid() || currentBlock.getType() == org.bukkit.Material.COBWEB;
+
+            if (bukkitPlayer.isOnGround()) {
+                if (highestY != -1 && !isLiquidOrCobweb) {
+                    double fallDistance = highestY - currentY;
+                    if (fallDistance > 3.0) {
+                        double damage = fallDistance - 3.0;
+                        org.bukkit.event.entity.EntityDamageEvent event = new org.bukkit.event.entity.EntityDamageEvent(
+                            bukkitPlayer,
+                            org.bukkit.event.entity.EntityDamageEvent.DamageCause.FALL,
+                            damage
+                        );
+                        Bukkit.getPluginManager().callEvent(event);
+                        if (!event.isCancelled()) {
+                            bukkitPlayer.setLastDamageCause(event);
+                            bukkitPlayer.damage(event.getFinalDamage());
+                        }
+                    }
+                }
+                highestY = -1;
+            } else {
+                if (isLiquidOrCobweb) {
+                    highestY = -1;
+                } else if (highestY == -1 || currentY > highestY) {
+                    highestY = currentY;
+                }
+            }
+
             // === 3. HEAD TRACKING: Look at nearest player ===
             if (bukkitPlayer.isOnline()) {
                 Player nearest = findNearestPlayer();
                 if (nearest != null) {
-                    Location botEyeLoc = bukkitPlayer.getEyeLocation();
-                    Location targetLoc = nearest.getEyeLocation();
-                    double dx = targetLoc.getX() - botEyeLoc.getX();
-                    double dy = targetLoc.getY() - botEyeLoc.getY();
-                    double dz = targetLoc.getZ() - botEyeLoc.getZ();
-                    double dist = Math.sqrt(dx * dx + dz * dz);
-                    if (dist > 0.001 || Math.abs(dy) > 0.001) {
-                        float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
-                        float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
-                        if (pitch > 90) pitch = 90;
-                        if (pitch < -90) pitch = -90;
-                        NMSHelper.setRotation(serverPlayer, yaw, pitch, yaw);
+                    double distSquared = nearest.getLocation().distanceSquared(bukkitPlayer.getLocation());
+                    if (distSquared <= 25.0) { // 5 blocks limit (5 * 5 = 25)
+                        Location botEyeLoc = bukkitPlayer.getEyeLocation();
+                        Location targetLoc = nearest.getEyeLocation();
+                        double dx = targetLoc.getX() - botEyeLoc.getX();
+                        double dy = targetLoc.getY() - botEyeLoc.getY();
+                        double dz = targetLoc.getZ() - botEyeLoc.getZ();
+                        double dist = Math.sqrt(dx * dx + dz * dz);
+                        if (dist > 0.001 || Math.abs(dy) > 0.001) {
+                            float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
+                            float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+                            if (pitch > 90) pitch = 90;
+                            if (pitch < -90) pitch = -90;
+                            NMSHelper.setRotation(serverPlayer, yaw, pitch, yaw);
+                        }
                     }
                 }
             }
