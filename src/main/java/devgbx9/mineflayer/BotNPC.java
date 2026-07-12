@@ -32,6 +32,9 @@ public class BotNPC {
     // Fall damage tracking
     private double highestY = -1;
 
+    // Default look direction tracking
+    private float spawnYaw;
+
     public BotNPC(String name, UUID uuid) {
         this.name = name;
         this.uuid = uuid;
@@ -57,6 +60,7 @@ public class BotNPC {
             // Force gravity ON and gamemode to SURVIVAL for proper physics
             bukkitPlayer.setGravity(true);
             bukkitPlayer.setGameMode(org.bukkit.GameMode.SURVIVAL);
+            this.spawnYaw = location.getYaw();
 
             NMSHelper.registerEntityInWorld(serverPlayer, location.getWorld());
             NMSHelper.broadcastBotSpawn(serverPlayer);
@@ -181,6 +185,7 @@ public class BotNPC {
             // === 3. HEAD TRACKING: Look at nearest player ===
             if (bukkitPlayer.isOnline()) {
                 Player nearest = findNearestPlayer();
+                boolean looked = false;
                 if (nearest != null) {
                     double distSquared = nearest.getLocation().distanceSquared(bukkitPlayer.getLocation());
                     if (distSquared <= 25.0) { // 5 blocks limit (5 * 5 = 25)
@@ -196,8 +201,13 @@ public class BotNPC {
                             if (pitch > 90) pitch = 90;
                             if (pitch < -90) pitch = -90;
                             NMSHelper.setRotation(serverPlayer, yaw, pitch, yaw);
+                            looked = true;
                         }
                     }
+                }
+                if (!looked) {
+                    // Reset looking direction to forward (spawn yaw) and pitch 0
+                    NMSHelper.setRotation(serverPlayer, spawnYaw, 0f, spawnYaw);
                 }
             }
         } catch (Exception ignored) {}

@@ -45,14 +45,44 @@ public class BotListener implements Listener {
     }
 
     /**
-     * Prevent the server from kicking the bot for any reason
+     * Prevent the server from kicking the bot for automatic reasons
      * (timeout, flying, moved too quickly, etc.)
+     * But allow administrative /kick and /ban commands to work.
      */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerKick(PlayerKickEvent event) {
         BotNPC bot = botManager.getBotByPlayer(event.getPlayer());
         if (bot != null) {
-            event.setCancelled(true);
+            boolean isAdminKick = false;
+            try {
+                // Check Paper API getCause() via reflection
+                Object causeObj = event.getClass().getMethod("getCause").invoke(event);
+                if (causeObj != null) {
+                    String causeName = causeObj.toString();
+                    if (causeName.equals("KICK_COMMAND") || causeName.equals("KICKED") 
+                        || causeName.equals("BANNED") || causeName.equals("IP_BANNED")) {
+                        isAdminKick = true;
+                    }
+                }
+            } catch (Exception e) {
+                // Fallback for Spigot or older Paper versions using kick reasons
+                String reason = event.getReason();
+                if (reason != null) {
+                    String rl = reason.toLowerCase();
+                    if (rl.contains("kick") || rl.contains("ban") || rl.contains("operator") 
+                        || rl.contains("admin") || rl.contains("bye") || rl.contains("removed")) {
+                        isAdminKick = true;
+                    }
+                }
+            }
+
+            if (isAdminKick) {
+                // Allow the kick to go through, which removes the bot permanently via PlayerQuitEvent
+                botManager.removeBot(bot.getName());
+                Bukkit.getLogger().info("[Mineflayer] Bot '" + bot.getName() + "' kicked by admin/command. Removing.");
+            } else {
+                event.setCancelled(true);
+            }
         }
     }
 
