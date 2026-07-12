@@ -522,6 +522,41 @@ public class NMSHelper {
             }
         }
 
+        // Ensure gravity is enabled (noGravity = false)
+        try {
+            Method setNoGravity = null;
+            Class<?> eCls = Class.forName("net.minecraft.world.entity.Entity");
+            try {
+                setNoGravity = eCls.getMethod("setNoGravity", boolean.class);
+            } catch (NoSuchMethodException e2) {
+                // Scan for method that takes single boolean (obfuscated name)
+                for (Method m : eCls.getDeclaredMethods()) {
+                    if (m.getParameterCount() == 1 && m.getParameterTypes()[0] == boolean.class
+                        && m.getReturnType() == void.class && m.getName().contains("Gravity")) {
+                        m.setAccessible(true);
+                        setNoGravity = m;
+                        break;
+                    }
+                }
+            }
+            if (setNoGravity != null) {
+                setNoGravity.invoke(serverPlayer, false);
+            }
+        } catch (Exception e) {
+            Bukkit.getLogger().warning("[Mineflayer] setNoGravity failed: " + e.getMessage());
+        }
+
+        // Set gamemode to SURVIVAL to ensure physics work
+        try {
+            // Use Bukkit API after player is created
+            Object bukkitEntity = serverPlayer.getClass().getMethod("getBukkitEntity").invoke(serverPlayer);
+            if (bukkitEntity instanceof org.bukkit.entity.Player bp) {
+                bp.setGameMode(org.bukkit.GameMode.SURVIVAL);
+            }
+        } catch (Exception e) {
+            Bukkit.getLogger().warning("[Mineflayer] setGameMode failed: " + e.getMessage());
+        }
+
         Object conn = null;
         if (packetFlowServerbound != null && connectionConstructor != null) {
             try {
