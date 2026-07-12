@@ -73,9 +73,8 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                 }
 
                 Location spawnLoc = player.getLocation();
-                sender.sendMessage("§eSpawning bot '" + name + "' (fetching skin from Mojang API)...");
+                getLogger().info("Spawning bot '" + name + "' (fetching skin from Mojang API)...");
                 botManager.createBotAsync(name, spawnLoc, this, (bot) -> {
-                    sender.sendMessage("§aBot '" + name + "' spawned with skin.");
                     getLogger().info("Bot '" + name + "' spawned by " + player.getName());
                 });
                 return true;
