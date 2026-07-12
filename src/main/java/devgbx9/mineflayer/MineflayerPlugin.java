@@ -51,7 +51,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length < 1) {
-            sender.sendMessage("§6Usage: /mineflayer add <name> | delete <name> | <name> standstill on/off | <name> lookat on/off");
+            sender.sendMessage("§6Usage: /mineflayer add <name> | delete <name> | <name> standstill on/off | <name> lookat on/off | <name> respawn on/off");
             return true;
         }
 
@@ -102,7 +102,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                     return true;
                 }
                 if (args.length < 3) {
-                    sender.sendMessage("§cUsage: /mineflayer " + botName + " standstill on/off | lookat on/off");
+                    sender.sendMessage("§cUsage: /mineflayer " + botName + " standstill on/off | lookat on/off | respawn on/off");
                     return true;
                 }
                 String subCmd = args[1].toLowerCase();
@@ -120,8 +120,13 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                         sender.sendMessage("§aBot '" + botName + "' lookat: " + (on ? "§2ON" : "§cOFF"));
                         break;
                     }
+                    case "respawn": {
+                        bot.setRespawnEnabled(on);
+                        sender.sendMessage("§aBot '" + botName + "' respawn: " + (on ? "§2ON" : "§cOFF"));
+                        break;
+                    }
                     default: {
-                        sender.sendMessage("§cUnknown subcommand. Use: standstill, lookat");
+                        sender.sendMessage("§cUnknown subcommand. Use: standstill, lookat, respawn");
                         break;
                     }
                 }
@@ -153,7 +158,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                 }
             } else if (botManager.exists(first)) {
                 // Bot name was typed, suggest subcommands
-                for (String cmd : List.of("standstill", "lookat")) {
+                for (String cmd : List.of("standstill", "lookat", "respawn")) {
                     if (cmd.startsWith(prefix)) result.add(cmd);
                 }
             }
@@ -162,7 +167,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
         if (args.length == 3 && botManager.exists(args[0].toLowerCase())) {
             String sub = args[1].toLowerCase();
             String prefix = args[2].toLowerCase();
-            if (sub.equals("standstill") || sub.equals("lookat")) {
+            if (sub.equals("standstill") || sub.equals("lookat") || sub.equals("respawn")) {
                 for (String v : List.of("on", "off")) {
                     if (v.startsWith(prefix)) result.add(v);
                 }

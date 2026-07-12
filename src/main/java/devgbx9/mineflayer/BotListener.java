@@ -28,8 +28,19 @@ public class BotListener implements Listener {
         BotNPC bot = botManager.getBotByPlayer(event.getPlayer());
         if (bot != null) {
             String name = bot.getName();
-            botManager.removeBot(name);
-            Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' died.");
+            if (bot.isRespawnEnabled()) {
+                // Delay by 1 tick to prevent dead-body glitching
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (bot.isAlive() && bot.getBukkitPlayer() != null) {
+                        bot.getBukkitPlayer().spigot().respawn();
+                        bot.getBukkitPlayer().teleport(bot.getSpawnLocation());
+                    }
+                });
+                Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' died and is respawning.");
+            } else {
+                botManager.removeBot(name);
+                Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' died.");
+            }
         }
     }
 
@@ -131,6 +142,19 @@ public class BotListener implements Listener {
         if (bot == null) return;
         if (bot.isStandStill()) {
             event.setCancelled(true);
+        }
+    }
+
+    /**
+     * Prevent mobs from targeting standstill bots.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onEntityTarget(org.bukkit.event.entity.EntityTargetLivingEntityEvent event) {
+        if (event.getTarget() instanceof Player target) {
+            BotNPC bot = botManager.getBotByPlayer(target);
+            if (bot != null && bot.isStandStill()) {
+                event.setCancelled(true);
+            }
         }
     }
 }

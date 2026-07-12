@@ -38,6 +38,8 @@ public class BotNPC {
     // Toggle flags
     private boolean standStill = false;
     private boolean lookAtEnabled = true;
+    private boolean respawnEnabled = false;
+    private Location spawnLocation;
 
     public BotNPC(String name, UUID uuid) {
         this.name = name;
@@ -62,6 +64,9 @@ public class BotNPC {
     }
     public boolean isLookAtEnabled() { return lookAtEnabled; }
     public void setLookAtEnabled(boolean lookAtEnabled) { this.lookAtEnabled = lookAtEnabled; }
+    public boolean isRespawnEnabled() { return respawnEnabled; }
+    public void setRespawnEnabled(boolean respawnEnabled) { this.respawnEnabled = respawnEnabled; }
+    public Location getSpawnLocation() { return spawnLocation; }
 
     public void spawn(Location location, Object profile) {
         if (alive) return;
@@ -78,6 +83,7 @@ public class BotNPC {
             bukkitPlayer.setGravity(true);
             bukkitPlayer.setGameMode(org.bukkit.GameMode.SURVIVAL);
             this.spawnYaw = location.getYaw();
+            this.spawnLocation = location.clone();
 
             NMSHelper.registerEntityInWorld(serverPlayer, location.getWorld());
             NMSHelper.broadcastBotSpawn(serverPlayer);
