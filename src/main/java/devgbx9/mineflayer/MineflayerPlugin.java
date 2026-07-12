@@ -113,21 +113,21 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                     case "standstill": {
                         bot.setStandStill(on);
                         sender.sendMessage("§aBot '" + botName + "' standstill: " + (on ? "§2ON" : "§cOFF"));
-                        return true;
+                        break;
                     }
                     case "lookat": {
                         bot.setLookAtEnabled(on);
                         sender.sendMessage("§aBot '" + botName + "' lookat: " + (on ? "§2ON" : "§cOFF"));
-                        return true;
+                        break;
                     }
                     default: {
                         sender.sendMessage("§cUnknown subcommand. Use: standstill, lookat");
-                        return true;
+                        break;
                     }
                 }
+                return true;
             }
         }
-        return false;
     }
 
     @Override
