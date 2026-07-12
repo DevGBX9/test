@@ -232,6 +232,36 @@ public class BotNPC {
                         }
                     }
                     if (!looked) {
+                        org.bukkit.entity.LivingEntity nearestMob = null;
+                        double nearestMobDistSq = Double.MAX_VALUE;
+                        for (org.bukkit.entity.Entity entity : bukkitPlayer.getNearbyEntities(5.0, 5.0, 5.0)) {
+                            if (entity instanceof org.bukkit.entity.LivingEntity living) {
+                                if (living instanceof Player) continue;
+                                double distSq = living.getLocation().distanceSquared(bukkitPlayer.getLocation());
+                                if (distSq < nearestMobDistSq) {
+                                    nearestMobDistSq = distSq;
+                                    nearestMob = living;
+                                }
+                            }
+                        }
+                        if (nearestMob != null && nearestMobDistSq <= 25.0) {
+                            Location botEyeLoc = bukkitPlayer.getEyeLocation();
+                            Location targetLoc = nearestMob.getEyeLocation();
+                            double dx = targetLoc.getX() - botEyeLoc.getX();
+                            double dy = targetLoc.getY() - botEyeLoc.getY();
+                            double dz = targetLoc.getZ() - botEyeLoc.getZ();
+                            double dist = Math.sqrt(dx * dx + dz * dz);
+                            if (dist > 0.001 || Math.abs(dy) > 0.001) {
+                                float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
+                                float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+                                if (pitch > 90) pitch = 90;
+                                if (pitch < -90) pitch = -90;
+                                NMSHelper.setRotation(serverPlayer, yaw, pitch, yaw);
+                                looked = true;
+                            }
+                        }
+                    }
+                    if (!looked) {
                         NMSHelper.setRotation(serverPlayer, spawnYaw, 0f, spawnYaw);
                     }
                 } else {
