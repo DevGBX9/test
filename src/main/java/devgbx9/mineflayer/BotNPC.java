@@ -102,7 +102,6 @@ public class BotNPC {
                 }
             } catch (Exception ignored) {}
 
-            broadcastJoin(name);
             Bukkit.getLogger().info("[Mineflayer] Bot '" + name + "' spawned (tickMethod=" + (tickMethod != null ? tickMethod.getName() : "null") + ", connectionField=" + (connectionField != null) + ")");
             alive = true;
         } catch (Exception e) {
@@ -304,10 +303,6 @@ public class BotNPC {
             }
         }
         return nearest;
-    }
-
-    private void broadcastJoin(String name) {
-        Bukkit.broadcastMessage("§e" + name + " joined the game");
     }
 
     private void broadcastLeave(String name) {

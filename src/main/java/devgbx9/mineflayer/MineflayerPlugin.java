@@ -22,7 +22,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
         getCommand("mineflayer").setTabCompleter(this);
 
         botManager = new BotManager();
-        getServer().getPluginManager().registerEvents(new BotListener(botManager), this);
+        getServer().getPluginManager().registerEvents(new BotListener(botManager, this), this);
 
         startTickTask();
 

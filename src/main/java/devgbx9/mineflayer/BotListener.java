@@ -10,14 +10,17 @@ import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
 
 public class BotListener implements Listener {
 
     private final BotManager botManager;
+    private final Plugin plugin;
 
-    public BotListener(BotManager botManager) {
+    public BotListener(BotManager botManager, Plugin plugin) {
         this.botManager = botManager;
+        this.plugin = plugin;
     }
 
     @EventHandler
@@ -50,13 +53,13 @@ public class BotListener implements Listener {
         BotNPC bot = botManager.getBotByPlayer(event.getPlayer());
         if (bot != null) {
             event.setCancelled(true);
-            Bukkit.getLogger().info("[Mineflayer] Prevented kick for bot '" + bot.getName() + "': " + event.getReason());
         }
     }
 
     /**
      * Apply knockback to bots when they take damage from another entity.
-     * This ensures the bot gets knocked back properly.
+     * Uses a 1-tick delay to ensure the velocity is applied AFTER
+     * ServerPlayer.tick() processes, so it won't get overwritten.
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {
@@ -77,16 +80,14 @@ public class BotListener implements Listener {
 
         // Normalize and apply knockback strength
         double knockbackStrength = 0.4;
-        double kbX = (dx / dist) * knockbackStrength;
-        double kbZ = (dz / dist) * knockbackStrength;
+        final double kbX = (dx / dist) * knockbackStrength;
+        final double kbZ = (dz / dist) * knockbackStrength;
 
-        // Apply velocity for knockback
-        Vector currentVel = victim.getVelocity();
-        victim.setVelocity(new Vector(
-            currentVel.getX() + kbX,
-            currentVel.getY() + 0.36,
-            currentVel.getZ() + kbZ
-        ));
+        // Apply knockback with a 1-tick delay so ServerPlayer.tick() doesn't overwrite it
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!victim.isOnline()) return;
+            victim.setVelocity(new Vector(kbX, 0.36, kbZ));
+        });
     }
 
     /**
