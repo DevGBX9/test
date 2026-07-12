@@ -35,6 +35,10 @@ public class BotNPC {
     // Default look direction tracking
     private float spawnYaw;
 
+    // Toggle flags
+    private boolean standStill = false;
+    private boolean lookAtEnabled = true;
+
     public BotNPC(String name, UUID uuid) {
         this.name = name;
         this.uuid = uuid;
@@ -45,6 +49,19 @@ public class BotNPC {
     public boolean isAlive() { return alive; }
     public Player getBukkitPlayer() { return bukkitPlayer; }
     public Object getServerPlayer() { return serverPlayer; }
+
+    public boolean isStandStill() { return standStill; }
+    public void setStandStill(boolean standStill) {
+        this.standStill = standStill;
+        if (bukkitPlayer != null) {
+            bukkitPlayer.setGravity(!standStill);
+            if (standStill) {
+                bukkitPlayer.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
+            }
+        }
+    }
+    public boolean isLookAtEnabled() { return lookAtEnabled; }
+    public void setLookAtEnabled(boolean lookAtEnabled) { this.lookAtEnabled = lookAtEnabled; }
 
     public void spawn(Location location, Object profile) {
         if (alive) return;
@@ -139,74 +156,80 @@ public class BotNPC {
             ensureKeepalive();
 
             // === 2. NATIVE TICK: Call ServerPlayer.doTick() or tick() for full physics ===
-            if (tickMethod != null) {
-                try {
-                    tickMethod.invoke(serverPlayer);
-                } catch (Exception e) {
-                    // Swallow NPEs from connection-related code inside tick()
-                    // The tick still processes physics/gravity before hitting connection logic
+            if (!standStill) {
+                if (tickMethod != null) {
+                    try {
+                        tickMethod.invoke(serverPlayer);
+                    } catch (Exception e) {
+                        // Swallow NPEs from connection-related code inside tick()
+                    }
+                } else {
+                    manualPhysicsFallback();
                 }
-            } else {
-                // Fallback: manual gravity if tick method unavailable
-                manualPhysicsFallback();
             }
 
             // === Fall Damage Logic ===
-            double currentY = bukkitPlayer.getLocation().getY();
-            org.bukkit.block.Block currentBlock = bukkitPlayer.getLocation().getBlock();
-            boolean isLiquidOrCobweb = currentBlock.isLiquid() || currentBlock.getType() == org.bukkit.Material.COBWEB;
+            if (!standStill) {
+                double currentY = bukkitPlayer.getLocation().getY();
+                org.bukkit.block.Block currentBlock = bukkitPlayer.getLocation().getBlock();
+                boolean isLiquidOrCobweb = currentBlock.isLiquid() || currentBlock.getType() == org.bukkit.Material.COBWEB;
 
-            if (bukkitPlayer.isOnGround()) {
-                if (highestY != -1 && !isLiquidOrCobweb) {
-                    double fallDistance = highestY - currentY;
-                    if (fallDistance > 3.0) {
-                        double damage = fallDistance - 3.0;
-                        org.bukkit.event.entity.EntityDamageEvent event = new org.bukkit.event.entity.EntityDamageEvent(
-                            bukkitPlayer,
-                            org.bukkit.event.entity.EntityDamageEvent.DamageCause.FALL,
-                            damage
-                        );
-                        Bukkit.getPluginManager().callEvent(event);
-                        if (!event.isCancelled()) {
-                            bukkitPlayer.setLastDamageCause(event);
-                            bukkitPlayer.damage(event.getFinalDamage());
+                if (bukkitPlayer.isOnGround()) {
+                    if (highestY != -1 && !isLiquidOrCobweb) {
+                        double fallDistance = highestY - currentY;
+                        if (fallDistance > 3.0) {
+                            double damage = fallDistance - 3.0;
+                            org.bukkit.event.entity.EntityDamageEvent event = new org.bukkit.event.entity.EntityDamageEvent(
+                                bukkitPlayer,
+                                org.bukkit.event.entity.EntityDamageEvent.DamageCause.FALL,
+                                damage
+                            );
+                            Bukkit.getPluginManager().callEvent(event);
+                            if (!event.isCancelled()) {
+                                bukkitPlayer.setLastDamageCause(event);
+                                bukkitPlayer.damage(event.getFinalDamage());
+                            }
                         }
                     }
-                }
-                highestY = -1;
-            } else {
-                if (isLiquidOrCobweb) {
                     highestY = -1;
-                } else if (highestY == -1 || currentY > highestY) {
-                    highestY = currentY;
+                } else {
+                    if (isLiquidOrCobweb) {
+                        highestY = -1;
+                    } else if (highestY == -1 || currentY > highestY) {
+                        highestY = currentY;
+                    }
                 }
             }
 
             // === 3. HEAD TRACKING: Look at nearest player ===
             if (bukkitPlayer.isOnline()) {
-                Player nearest = findNearestPlayer();
-                boolean looked = false;
-                if (nearest != null) {
-                    double distSquared = nearest.getLocation().distanceSquared(bukkitPlayer.getLocation());
-                    if (distSquared <= 25.0) { // 5 blocks limit (5 * 5 = 25)
-                        Location botEyeLoc = bukkitPlayer.getEyeLocation();
-                        Location targetLoc = nearest.getEyeLocation();
-                        double dx = targetLoc.getX() - botEyeLoc.getX();
-                        double dy = targetLoc.getY() - botEyeLoc.getY();
-                        double dz = targetLoc.getZ() - botEyeLoc.getZ();
-                        double dist = Math.sqrt(dx * dx + dz * dz);
-                        if (dist > 0.001 || Math.abs(dy) > 0.001) {
-                            float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
-                            float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
-                            if (pitch > 90) pitch = 90;
-                            if (pitch < -90) pitch = -90;
-                            NMSHelper.setRotation(serverPlayer, yaw, pitch, yaw);
-                            looked = true;
+                if (lookAtEnabled) {
+                    Player nearest = findNearestPlayer();
+                    boolean looked = false;
+                    if (nearest != null) {
+                        double distSquared = nearest.getLocation().distanceSquared(bukkitPlayer.getLocation());
+                        if (distSquared <= 25.0) {
+                            Location botEyeLoc = bukkitPlayer.getEyeLocation();
+                            Location targetLoc = nearest.getEyeLocation();
+                            double dx = targetLoc.getX() - botEyeLoc.getX();
+                            double dy = targetLoc.getY() - botEyeLoc.getY();
+                            double dz = targetLoc.getZ() - botEyeLoc.getZ();
+                            double dist = Math.sqrt(dx * dx + dz * dz);
+                            if (dist > 0.001 || Math.abs(dy) > 0.001) {
+                                float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
+                                float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+                                if (pitch > 90) pitch = 90;
+                                if (pitch < -90) pitch = -90;
+                                NMSHelper.setRotation(serverPlayer, yaw, pitch, yaw);
+                                looked = true;
+                            }
                         }
                     }
-                }
-                if (!looked) {
-                    // Reset looking direction to forward (spawn yaw) and pitch 0
+                    if (!looked) {
+                        NMSHelper.setRotation(serverPlayer, spawnYaw, 0f, spawnYaw);
+                    }
+                } else {
+                    // lookAt disabled — always face spawn direction
                     NMSHelper.setRotation(serverPlayer, spawnYaw, 0f, spawnYaw);
                 }
             }

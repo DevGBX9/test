@@ -51,7 +51,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length < 1) {
-            sender.sendMessage("§6Usage: /mineflayer add <name>");
+            sender.sendMessage("§6Usage: /mineflayer add <name> | delete <name> | <name> standstill on/off | <name> lookat on/off");
             return true;
         }
 
@@ -92,23 +92,83 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                 }
                 return true;
             }
+            default: {
+                // Handle: /mineflayer <botname> standstill on/off
+                //         /mineflayer <botname> lookat on/off
+                String botName = args[0];
+                BotNPC bot = botManager.getBot(botName);
+                if (bot == null || !bot.isAlive()) {
+                    sender.sendMessage("§cBot '" + botName + "' not found.");
+                    return true;
+                }
+                if (args.length < 3) {
+                    sender.sendMessage("§cUsage: /mineflayer " + botName + " standstill on/off | lookat on/off");
+                    return true;
+                }
+                String subCmd = args[1].toLowerCase();
+                String value = args[2].toLowerCase();
+                boolean on = value.equals("on");
+
+                switch (subCmd) {
+                    case "standstill": {
+                        bot.setStandStill(on);
+                        sender.sendMessage("§aBot '" + botName + "' standstill: " + (on ? "§2ON" : "§cOFF"));
+                        return true;
+                    }
+                    case "lookat": {
+                        bot.setLookAtEnabled(on);
+                        sender.sendMessage("§aBot '" + botName + "' lookat: " + (on ? "§2ON" : "§cOFF"));
+                        return true;
+                    }
+                    default: {
+                        sender.sendMessage("§cUnknown subcommand. Use: standstill, lookat");
+                        return true;
+                    }
+                }
+            }
         }
         return false;
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        List<String> result = new ArrayList<>();
         if (args.length == 1) {
-            return List.of("add", "delete");
-        }
-        if (args.length == 2 && args[0].equalsIgnoreCase("delete")) {
-            String prefix = args[1].toLowerCase();
-            List<String> result = new ArrayList<>();
+            String prefix = args[0].toLowerCase();
+            for (String cmd : List.of("add", "delete")) {
+                if (cmd.startsWith(prefix)) result.add(cmd);
+            }
+            // Also suggest bot names for <botname> subcommands
             for (String n : botManager.getBotNames()) {
                 if (n.toLowerCase().startsWith(prefix)) result.add(n);
             }
             return result;
         }
-        return new ArrayList<>();
+        if (args.length == 2) {
+            String first = args[0].toLowerCase();
+            String prefix = args[1].toLowerCase();
+            if (first.equals("delete")) {
+                for (String n : botManager.getBotNames()) {
+                    if (n.toLowerCase().startsWith(prefix)) result.add(n);
+                }
+            } else if (botManager.exists(first)) {
+                // Bot name was typed, suggest subcommands
+                for (String cmd : List.of("standstill", "lookat")) {
+                    if (cmd.startsWith(prefix)) result.add(cmd);
+                }
+            }
+            return result;
+        }
+        if (args.length == 3 && botManager.exists(args[0].toLowerCase())) {
+            String sub = args[1].toLowerCase();
+            String prefix = args[2].toLowerCase();
+            if (sub.equals("standstill") || sub.equals("lookat")) {
+                for (String v : List.of("on", "off")) {
+                    if (v.startsWith(prefix)) result.add(v);
+                }
+            }
+            return result;
+        }
+        return result;
     }
 }

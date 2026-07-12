@@ -96,6 +96,7 @@ public class BotListener implements Listener {
         if (!(event.getEntity() instanceof Player victim)) return;
         BotNPC bot = botManager.getBotByPlayer(victim);
         if (bot == null) return;
+        if (bot.isStandStill()) return; // No knockback in standstill mode
 
         // Calculate knockback direction from attacker to bot
         org.bukkit.entity.Entity attacker = event.getDamager();
@@ -121,13 +122,15 @@ public class BotListener implements Listener {
     }
 
     /**
-     * Ensure bots take damage properly.
+     * Handle bot damage. Cancel all damage when standStill is active.
      */
     @EventHandler(priority = EventPriority.LOWEST)
     public void onEntityDamage(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player victim)) return;
         BotNPC bot = botManager.getBotByPlayer(victim);
         if (bot == null) return;
-        // Don't cancel — let the damage go through so the bot takes damage normally
+        if (bot.isStandStill()) {
+            event.setCancelled(true);
+        }
     }
 }
