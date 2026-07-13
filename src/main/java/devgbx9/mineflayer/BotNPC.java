@@ -326,24 +326,48 @@ public class BotNPC {
         double vz = nz * speed;
         double vy = bukkitPlayer.getVelocity().getY();
 
-        // Jump detection: check if there's a solid block in front at feet level
-        // but the space above is clear (so the bot can jump over it)
         boolean onGround = bukkitPlayer.isOnGround();
+
+        // Anti-fall check: check if the next step is a cliff/hole
+        Location nextStep = botLoc.clone().add(nx * 0.6, 0, nz * 0.6);
+        boolean isSafe = false;
+        // Check down to 4 blocks below
+        for (int yOffset = 0; yOffset >= -4; yOffset--) {
+            Block b = nextStep.clone().add(0, yOffset, 0).getBlock();
+            if (b.getType().isSolid() || b.isLiquid()) {
+                isSafe = true;
+                break;
+            }
+        }
+
+        // If next step is a dangerous fall, and the player is not down there
+        if (!isSafe && targetLoc.getY() >= botLoc.getY() - 1.5) {
+            // Stop horizontal movement
+            vx = 0;
+            vz = 0;
+            // Try to jump across a gap if target is close
+            if (onGround && distance < 5.0) {
+                vy = 0.42;
+                vx = nx * speed;
+                vz = nz * speed;
+            }
+        }
+
+        // Jump detection: check if there's a solid block in front at feet level
         if (onGround) {
             Location feetFront = botLoc.clone().add(nx * 0.6, 0, nz * 0.6);
             Block blockAtFeet = feetFront.getBlock();
-            Block blockAboveFeet = feetFront.clone().add(0, 1, 0).getBlock();
+            Block blockAboveFeet = feetFront.clone().add(0, 1.0, 0).getBlock();
 
             if (blockAtFeet.getType().isSolid() && !blockAboveFeet.getType().isSolid()) {
-                // Jump! Standard Minecraft jump velocity
                 vy = 0.42;
             }
+        }
 
-            // Also handle water/lava: swim up
-            Block currentBlock = botLoc.getBlock();
-            if (currentBlock.isLiquid()) {
-                vy = 0.12;
-            }
+        // Handle water/lava: swim up
+        Block currentBlock = botLoc.getBlock();
+        if (currentBlock.isLiquid()) {
+            vy = 0.15;
         }
 
         // Set sprint state
