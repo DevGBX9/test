@@ -46,6 +46,7 @@ public class BotNPC {
 
     // Follow system
     private Player followTarget = null;
+    private org.bukkit.entity.Villager proxyMob = null;
 
     public BotNPC(String name, UUID uuid) {
         this.name = name;
@@ -75,8 +76,50 @@ public class BotNPC {
     public Location getSpawnLocation() { return spawnLocation; }
 
     public Player getFollowTarget() { return followTarget; }
-    public void setFollowTarget(Player target) { this.followTarget = target; }
-    public void clearFollowTarget() { this.followTarget = null; }
+    public void setFollowTarget(Player target) {
+        this.followTarget = target;
+        cleanupProxyMob();
+        if (target != null && bukkitPlayer != null && bukkitPlayer.isOnline()) {
+            setupProxyMob();
+        }
+    }
+    public void clearFollowTarget() {
+        this.followTarget = null;
+        cleanupProxyMob();
+    }
+
+    private void setupProxyMob() {
+        if (bukkitPlayer == null) return;
+        try {
+            Location loc = bukkitPlayer.getLocation();
+            proxyMob = loc.getWorld().spawn(loc, org.bukkit.entity.Villager.class);
+            proxyMob.setInvisible(true);
+            proxyMob.setSilent(true);
+            proxyMob.setCollidable(false);
+            proxyMob.setInvulnerable(true);
+            proxyMob.setRemoveWhenFarAway(false);
+
+            org.bukkit.plugin.Plugin plugin = Bukkit.getPluginManager().getPlugin("Mineflayer");
+            if (plugin != null) {
+                proxyMob.setMetadata("mineflayer_proxy", new org.bukkit.metadata.FixedMetadataValue(plugin, true));
+            }
+
+            try {
+                Bukkit.getMobGoals().removeAllGoals(proxyMob);
+            } catch (Exception ignored) {}
+        } catch (Exception e) {
+            Bukkit.getLogger().severe("[Mineflayer] Failed to spawn pathfinding proxy: " + e.getMessage());
+        }
+    }
+
+    private void cleanupProxyMob() {
+        if (proxyMob != null) {
+            try {
+                proxyMob.remove();
+            } catch (Exception ignored) {}
+            proxyMob = null;
+        }
+    }
 
     public void spawn(Location location, Object profile) {
         if (alive) return;
@@ -152,6 +195,7 @@ public class BotNPC {
 
     public void remove() {
         if (!alive) return;
+        cleanupProxyMob();
         if (bukkitPlayer != null) {
             try { bukkitPlayer.kickPlayer("Bot removed"); } catch (Exception ignored) {}
         }
@@ -285,12 +329,12 @@ public class BotNPC {
     }
 
     /**
-     * Smart follow movement: calculate velocity toward follow target,
-     * handle jumping over obstacles, and sprint when far away.
+     * Smart follow movement: calculate path using native Minecraft pathfinder
+     * via the invisible proxy Villager, and sync bot position.
      */
     private void tickFollow() {
         if (followTarget == null || !followTarget.isOnline()) {
-            followTarget = null;
+            clearFollowTarget();
             return;
         }
 
@@ -298,63 +342,48 @@ public class BotNPC {
         Location targetLoc = followTarget.getLocation();
 
         // Don't follow if in different worlds
-        if (!botLoc.getWorld().equals(targetLoc.getWorld())) return;
-
-        double distance = botLoc.distance(targetLoc);
-
-        // If close enough, stop moving
-        if (distance < 2.0) {
-            bukkitPlayer.setVelocity(new Vector(0, bukkitPlayer.getVelocity().getY(), 0));
+        if (!botLoc.getWorld().equals(targetLoc.getWorld())) {
+            cleanupProxyMob();
+            bukkitPlayer.teleport(targetLoc);
+            setupProxyMob();
             return;
         }
 
-        // Calculate direction toward target
-        double dx = targetLoc.getX() - botLoc.getX();
-        double dz = targetLoc.getZ() - botLoc.getZ();
-        double horizontalDist = Math.sqrt(dx * dx + dz * dz);
-        if (horizontalDist < 0.001) return;
-
-        // Normalize direction
-        double nx = dx / horizontalDist;
-        double nz = dz / horizontalDist;
-
-        // Speed: sprint when far, walk when closer
-        double speed = distance > 6.0 ? 0.26 : 0.19;
-
-        // Calculate horizontal velocity
-        double vx = nx * speed;
-        double vz = nz * speed;
-        double vy = bukkitPlayer.getVelocity().getY();
-
-        // Jump detection: check if there's a solid block in front at feet level
-        // but the space above is clear (so the bot can jump over it)
-        boolean onGround = bukkitPlayer.isOnGround();
-        if (onGround) {
-            Location feetFront = botLoc.clone().add(nx * 0.6, 0, nz * 0.6);
-            Block blockAtFeet = feetFront.getBlock();
-            Block blockAboveFeet = feetFront.clone().add(0, 1, 0).getBlock();
-
-            if (blockAtFeet.getType().isSolid() && !blockAboveFeet.getType().isSolid()) {
-                // Jump! Standard Minecraft jump velocity
-                vy = 0.42;
-            }
-
-            // Also handle water/lava: swim up
-            Block currentBlock = botLoc.getBlock();
-            if (currentBlock.isLiquid()) {
-                vy = 0.12;
-            }
+        // Recreate proxy if invalid
+        if (proxyMob == null || !proxyMob.isValid()) {
+            setupProxyMob();
         }
 
-        // Set sprint state
-        bukkitPlayer.setSprinting(distance > 6.0);
+        if (proxyMob == null) return;
 
-        // Apply velocity
-        bukkitPlayer.setVelocity(new Vector(vx, vy, vz));
+        double distance = botLoc.distance(targetLoc);
 
-        // Face the direction of movement (yaw) — head tracking will look at target separately
-        float moveYaw = (float) Math.toDegrees(Math.atan2(nz, nx)) - 90;
-        NMSHelper.setRotation(serverPlayer, moveYaw, 0f, moveYaw);
+        // Teleport catch-up if too far away
+        if (distance > 20.0) {
+            proxyMob.teleport(targetLoc);
+            NMSHelper.teleport(serverPlayer, targetLoc.getX(), targetLoc.getY(), targetLoc.getZ(), targetLoc.getYaw(), targetLoc.getPitch());
+            return;
+        }
+
+        // Instruct pathfinder to move
+        try {
+            double speed = distance > 6.0 ? 1.5 : 1.25;
+            proxyMob.getPathfinder().moveTo(followTarget, speed);
+        } catch (Exception ignored) {}
+
+        // Make proxy swim up if in liquid
+        try {
+            if (proxyMob.getLocation().getBlock().isLiquid()) {
+                proxyMob.setVelocity(proxyMob.getVelocity().setY(0.12));
+            }
+        } catch (Exception ignored) {}
+
+        // Sync bot position to proxy location smoothly via NMS teleport
+        Location pLoc = proxyMob.getLocation();
+        float yaw = bukkitPlayer.getLocation().getYaw();
+        float pitch = bukkitPlayer.getLocation().getPitch();
+        
+        NMSHelper.teleport(serverPlayer, pLoc.getX(), pLoc.getY(), pLoc.getZ(), yaw, pitch);
     }
 
     /**
