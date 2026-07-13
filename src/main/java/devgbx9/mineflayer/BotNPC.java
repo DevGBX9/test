@@ -416,18 +416,52 @@ public class BotNPC {
 
     /**
      * Wander like a passive Minecraft mob: pick random nearby spots,
-     * walk to them, pause, and repeat.
+     * walk to them, pause, and repeat. Runs away from nearby hostile monsters.
      */
     private void tickWander() {
-        // Cooldown: bot is pausing between walks (like passive mobs idle)
-        if (wanderCooldown > 0) {
+        Location botLoc = bukkitPlayer.getLocation();
+
+        // 1. Check for nearby monsters to trigger panic mode
+        org.bukkit.entity.LivingEntity nearestMonster = null;
+        double nearestMonsterDistSq = Double.MAX_VALUE;
+        for (org.bukkit.entity.Entity entity : bukkitPlayer.getNearbyEntities(10.0, 10.0, 10.0)) {
+            if (entity instanceof org.bukkit.entity.LivingEntity living) {
+                if (living instanceof org.bukkit.entity.Monster || 
+                    living instanceof org.bukkit.entity.Phantom || 
+                    living instanceof org.bukkit.entity.Slime) {
+                    
+                    double distSq = living.getLocation().distanceSquared(botLoc);
+                    if (distSq < nearestMonsterDistSq) {
+                        nearestMonsterDistSq = distSq;
+                        nearestMonster = living;
+                    }
+                }
+            }
+        }
+
+        boolean panic = nearestMonster != null;
+
+        if (panic) {
+            // Panic behavior: calculate escape direction (away from monster)
+            Vector escapeDir = botLoc.toVector().subtract(nearestMonster.getLocation().toVector()).setY(0);
+            if (escapeDir.lengthSquared() < 0.001) {
+                escapeDir = new Vector(RANDOM.nextDouble() - 0.5, 0, RANDOM.nextDouble() - 0.5);
+            }
+            Location escapeTarget = findSafeEscapeTarget(botLoc, escapeDir.normalize());
+            if (escapeTarget != null) {
+                wanderTarget = escapeTarget;
+                wanderCooldown = 0; // Cancel cooldown to run immediately
+                wanderTimeout = 100; // 5 seconds max to escape to this spot
+            }
+        }
+
+        // Cooldown: bot is pausing between walks (like passive mobs idle) — skipped during panic
+        if (!panic && wanderCooldown > 0) {
             wanderCooldown--;
             return;
         }
 
-        Location botLoc = bukkitPlayer.getLocation();
-
-        // Pick a new wander target if we don't have one
+        // Pick a new wander target if we don't have one and not in panic
         if (wanderTarget == null) {
             wanderTarget = findWanderTarget(botLoc);
             wanderTimeout = 200; // 10 seconds max to reach target
@@ -450,12 +484,17 @@ public class BotNPC {
         double distance = botLoc.distance(wanderTarget);
         if (distance < 1.5) {
             wanderTarget = null;
-            wanderCooldown = 40 + RANDOM.nextInt(80); // 2-6 seconds pause
+            if (panic) {
+                // If we just finished escaping, pause briefly to see if still threatened
+                wanderCooldown = 10 + RANDOM.nextInt(20);
+            } else {
+                wanderCooldown = 40 + RANDOM.nextInt(80); // 2-6 seconds pause
+            }
             bukkitPlayer.setVelocity(new Vector(0, bukkitPlayer.getVelocity().getY(), 0));
             return;
         }
 
-        // Walk toward wander target
+        // Walk/Run toward target
         double dx = wanderTarget.getX() - botLoc.getX();
         double dz = wanderTarget.getZ() - botLoc.getZ();
         double horizontalDist = Math.sqrt(dx * dx + dz * dz);
@@ -463,7 +502,9 @@ public class BotNPC {
 
         double nx = dx / horizontalDist;
         double nz = dz / horizontalDist;
-        double speed = 0.14; // Slow walk speed like passive mobs
+        
+        // Speed: run fast if in panic, walk slowly otherwise
+        double speed = panic ? 0.26 : 0.14;
 
         double vx = nx * speed;
         double vz = nz * speed;
@@ -509,6 +550,9 @@ public class BotNPC {
         // Face direction of movement
         float moveYaw = (float) Math.toDegrees(Math.atan2(nz, nx)) - 90;
         NMSHelper.setRotation(serverPlayer, moveYaw, 0f, moveYaw);
+
+        // Set sprinting animation if in panic
+        bukkitPlayer.setSprinting(panic);
     }
 
     /**
@@ -549,6 +593,65 @@ public class BotNPC {
             return target;
         }
         return null;
+    }
+
+    /**
+     * Find a safe escape target away from a monster.
+     * Projects a target block away and scans adjacent angles (up to 90 deg) if blocked or cliff.
+     */
+    private Location findSafeEscapeTarget(Location origin, Vector direction) {
+        double[] angles = {0, 30, -30, 60, -60, 90, -90};
+        for (double angle : angles) {
+            Vector rotDir = rotateVector(direction, angle);
+            double targetX = origin.getX() + rotDir.getX() * 8.0;
+            double targetZ = origin.getZ() + rotDir.getZ() * 8.0;
+
+            Location check = new Location(origin.getWorld(), targetX, origin.getY() + 3, targetZ);
+            Block ground = null;
+            for (int y = 0; y < 10; y++) {
+                Block b = check.clone().add(0, -y, 0).getBlock();
+                if (b.getType().isSolid()) {
+                    ground = b;
+                    break;
+                }
+            }
+
+            if (ground == null) continue;
+
+            Location target = ground.getLocation().add(0.5, 1.0, 0.5);
+            Block above1 = target.getBlock();
+            Block above2 = target.clone().add(0, 1, 0).getBlock();
+            if (above1.getType().isSolid() || above2.getType().isSolid()) continue;
+
+            // Make sure next step is safe (anti-fall check)
+            double nx = rotDir.getX();
+            double nz = rotDir.getZ();
+            Location nextStep = origin.clone().add(nx * 0.6, 0, nz * 0.6);
+            boolean stepSafe = false;
+            for (int yOffset = 0; yOffset >= -3; yOffset--) {
+                Block b = nextStep.clone().add(0, yOffset, 0).getBlock();
+                if (b.getType().isSolid() || b.isLiquid()) {
+                    stepSafe = true;
+                    break;
+                }
+            }
+            if (!stepSafe) continue;
+
+            return target;
+        }
+        return null;
+    }
+
+    /**
+     * Helper to rotate a 2D vector on the XZ plane.
+     */
+    private Vector rotateVector(Vector vector, double degrees) {
+        double rad = Math.toRadians(degrees);
+        double cos = Math.cos(rad);
+        double sin = Math.sin(rad);
+        double x = vector.getX() * cos - vector.getZ() * sin;
+        double z = vector.getX() * sin + vector.getZ() * cos;
+        return new Vector(x, 0, z);
     }
 
     /**
