@@ -241,11 +241,25 @@ public class BotNPC {
                 }
             }
 
-            // === 3. HEAD TRACKING: Look at nearest player/mob or follow target ===
+            // === 3. HEAD TRACKING: Look at nearest player/mob, follow target, or wander target ===
             if (bukkitPlayer.isOnline()) {
                 if (followTarget != null && followTarget.isOnline()) {
                     // When following, always look at the follow target
                     lookAtEntity(followTarget);
+                } else if (wanderEnabled && wanderTarget != null) {
+                    // Look at the wander target
+                    Location botEyeLoc = bukkitPlayer.getEyeLocation();
+                    double dx = wanderTarget.getX() - botEyeLoc.getX();
+                    double dy = (wanderTarget.getY() + 0.5) - botEyeLoc.getY();
+                    double dz = wanderTarget.getZ() - botEyeLoc.getZ();
+                    double dist = Math.sqrt(dx * dx + dz * dz);
+                    if (dist > 0.001 || Math.abs(dy) > 0.001) {
+                        float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
+                        float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+                        if (pitch > 90) pitch = 90;
+                        if (pitch < -90) pitch = -90;
+                        NMSHelper.setRotation(serverPlayer, yaw, pitch, yaw);
+                    }
                 } else if (lookAtEnabled) {
                     Player nearest = findNearestPlayer();
                     boolean looked = false;
