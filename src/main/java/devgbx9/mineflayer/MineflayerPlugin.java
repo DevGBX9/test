@@ -103,7 +103,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                     return true;
                 }
                 if (args.length < 2) {
-                    sender.sendMessage("§cUsage: /mineflayer " + botName + " <standstill|lookat|respawn|followme|follow|stopfollow>");
+                    sender.sendMessage("§cUsage: /mineflayer " + botName + " <standstill|lookat|respawn|wander|followme|follow|stopfollow>");
                     return true;
                 }
                 String subCmd = args[1].toLowerCase();
@@ -168,8 +168,13 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                         sender.sendMessage("§aBot '" + botName + "' respawn: " + (on ? "§2ON" : "§cOFF"));
                         break;
                     }
+                    case "wander": {
+                        bot.setWanderEnabled(on);
+                        sender.sendMessage("§aBot '" + botName + "' wander: " + (on ? "§2ON" : "§cOFF"));
+                        break;
+                    }
                     default: {
-                        sender.sendMessage("§cUnknown subcommand. Use: standstill, lookat, respawn, followme, follow, stopfollow");
+                        sender.sendMessage("§cUnknown subcommand. Use: standstill, lookat, respawn, wander, followme, follow, stopfollow");
                         break;
                     }
                 }
@@ -201,7 +206,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                 }
             } else if (botManager.exists(first)) {
                 // Bot name was typed, suggest subcommands
-                for (String cmd : List.of("standstill", "lookat", "respawn", "followme", "follow", "stopfollow")) {
+                for (String cmd : List.of("standstill", "lookat", "respawn", "wander", "followme", "follow", "stopfollow")) {
                     if (cmd.startsWith(prefix)) result.add(cmd);
                 }
             }
@@ -210,7 +215,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
         if (args.length == 3 && botManager.exists(args[0].toLowerCase())) {
             String sub = args[1].toLowerCase();
             String prefix = args[2].toLowerCase();
-            if (sub.equals("standstill") || sub.equals("lookat") || sub.equals("respawn")) {
+            if (sub.equals("standstill") || sub.equals("lookat") || sub.equals("respawn") || sub.equals("wander")) {
                 for (String v : List.of("on", "off")) {
                     if (v.startsWith(prefix)) result.add(v);
                 }

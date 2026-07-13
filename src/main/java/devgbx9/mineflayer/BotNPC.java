@@ -47,6 +47,13 @@ public class BotNPC {
     // Follow system
     private Player followTarget = null;
 
+    // Wander system
+    private boolean wanderEnabled = false;
+    private Location wanderTarget = null;
+    private int wanderCooldown = 0;
+    private int wanderTimeout = 0;
+    private static final java.util.Random RANDOM = new java.util.Random();
+
     public BotNPC(String name, UUID uuid) {
         this.name = name;
         this.uuid = uuid;
@@ -73,6 +80,16 @@ public class BotNPC {
     public boolean isRespawnEnabled() { return respawnEnabled; }
     public void setRespawnEnabled(boolean respawnEnabled) { this.respawnEnabled = respawnEnabled; }
     public Location getSpawnLocation() { return spawnLocation; }
+
+    public boolean isWanderEnabled() { return wanderEnabled; }
+    public void setWanderEnabled(boolean wanderEnabled) {
+        this.wanderEnabled = wanderEnabled;
+        if (!wanderEnabled) {
+            wanderTarget = null;
+            wanderCooldown = 0;
+            wanderTimeout = 0;
+        }
+    }
 
     public Player getFollowTarget() { return followTarget; }
     public void setFollowTarget(Player target) { this.followTarget = target; }
@@ -171,9 +188,11 @@ public class BotNPC {
             // === 1. KEEPALIVE: Prevent timeout disconnect ===
             ensureKeepalive();
 
-            // === 1.5. FOLLOW MOVEMENT: Apply velocity toward target before physics tick ===
+            // === 1.5. FOLLOW / WANDER MOVEMENT ===
             if (!standStill && followTarget != null) {
                 tickFollow();
+            } else if (!standStill && wanderEnabled && followTarget == null) {
+                tickWander();
             }
 
             // === 2. NATIVE TICK: Call ServerPlayer.doTick() or tick() for full physics ===
@@ -379,6 +398,143 @@ public class BotNPC {
         // Face the direction of movement (yaw) — head tracking will look at target separately
         float moveYaw = (float) Math.toDegrees(Math.atan2(nz, nx)) - 90;
         NMSHelper.setRotation(serverPlayer, moveYaw, 0f, moveYaw);
+    }
+
+    /**
+     * Wander like a passive Minecraft mob: pick random nearby spots,
+     * walk to them, pause, and repeat.
+     */
+    private void tickWander() {
+        // Cooldown: bot is pausing between walks (like passive mobs idle)
+        if (wanderCooldown > 0) {
+            wanderCooldown--;
+            return;
+        }
+
+        Location botLoc = bukkitPlayer.getLocation();
+
+        // Pick a new wander target if we don't have one
+        if (wanderTarget == null) {
+            wanderTarget = findWanderTarget(botLoc);
+            wanderTimeout = 200; // 10 seconds max to reach target
+            if (wanderTarget == null) {
+                // No valid target found, wait a bit
+                wanderCooldown = 40 + RANDOM.nextInt(60); // 2-5 seconds
+                return;
+            }
+        }
+
+        // Timeout: give up and pick a new target after a while
+        wanderTimeout--;
+        if (wanderTimeout <= 0) {
+            wanderTarget = null;
+            wanderCooldown = 40 + RANDOM.nextInt(80); // 2-6 seconds pause
+            return;
+        }
+
+        // Check if we've arrived
+        double distance = botLoc.distance(wanderTarget);
+        if (distance < 1.5) {
+            wanderTarget = null;
+            wanderCooldown = 40 + RANDOM.nextInt(80); // 2-6 seconds pause
+            bukkitPlayer.setVelocity(new Vector(0, bukkitPlayer.getVelocity().getY(), 0));
+            return;
+        }
+
+        // Walk toward wander target
+        double dx = wanderTarget.getX() - botLoc.getX();
+        double dz = wanderTarget.getZ() - botLoc.getZ();
+        double horizontalDist = Math.sqrt(dx * dx + dz * dz);
+        if (horizontalDist < 0.001) return;
+
+        double nx = dx / horizontalDist;
+        double nz = dz / horizontalDist;
+        double speed = 0.14; // Slow walk speed like passive mobs
+
+        double vx = nx * speed;
+        double vz = nz * speed;
+        double vy = bukkitPlayer.getVelocity().getY();
+
+        boolean onGround = bukkitPlayer.isOnGround();
+
+        // Anti-fall check
+        Location nextStep = botLoc.clone().add(nx * 0.6, 0, nz * 0.6);
+        boolean isSafe = false;
+        for (int yOffset = 0; yOffset >= -3; yOffset--) {
+            Block b = nextStep.clone().add(0, yOffset, 0).getBlock();
+            if (b.getType().isSolid() || b.isLiquid()) {
+                isSafe = true;
+                break;
+            }
+        }
+        if (!isSafe) {
+            // Dangerous drop ahead, pick a new target
+            wanderTarget = null;
+            wanderCooldown = 20 + RANDOM.nextInt(40);
+            return;
+        }
+
+        // Jump over 1-block obstacles
+        if (onGround) {
+            Location feetFront = botLoc.clone().add(nx * 0.6, 0, nz * 0.6);
+            Block blockAtFeet = feetFront.getBlock();
+            Block blockAboveFeet = feetFront.clone().add(0, 1.0, 0).getBlock();
+            if (blockAtFeet.getType().isSolid() && !blockAboveFeet.getType().isSolid()) {
+                vy = 0.42;
+            }
+        }
+
+        // Swim up if in liquid
+        Block currentBlock = botLoc.getBlock();
+        if (currentBlock.isLiquid()) {
+            vy = 0.15;
+        }
+
+        bukkitPlayer.setVelocity(new Vector(vx, vy, vz));
+
+        // Face direction of movement
+        float moveYaw = (float) Math.toDegrees(Math.atan2(nz, nx)) - 90;
+        NMSHelper.setRotation(serverPlayer, moveYaw, 0f, moveYaw);
+    }
+
+    /**
+     * Find a valid random wander target nearby, like Minecraft's RandomStrollGoal.
+     */
+    private Location findWanderTarget(Location origin) {
+        for (int attempts = 0; attempts < 10; attempts++) {
+            double offsetX = (RANDOM.nextDouble() * 16.0) - 8.0; // -8 to +8 blocks
+            double offsetZ = (RANDOM.nextDouble() * 16.0) - 8.0;
+
+            double targetX = origin.getX() + offsetX;
+            double targetZ = origin.getZ() + offsetZ;
+
+            // Find ground level at target X/Z
+            Location check = new Location(origin.getWorld(), targetX, origin.getY() + 3, targetZ);
+            Block ground = null;
+            for (int y = 0; y < 10; y++) {
+                Block b = check.clone().add(0, -y, 0).getBlock();
+                if (b.getType().isSolid()) {
+                    ground = b;
+                    break;
+                }
+            }
+
+            if (ground == null) continue; // No ground found, skip
+
+            Location target = ground.getLocation().add(0.5, 1.0, 0.5);
+
+            // Check if there's 2 blocks of air above (player can fit)
+            Block above1 = target.getBlock();
+            Block above2 = target.clone().add(0, 1, 0).getBlock();
+            if (above1.getType().isSolid() || above2.getType().isSolid()) continue;
+
+            // Check height difference is not too extreme
+            double heightDiff = Math.abs(target.getY() - origin.getY());
+            if (heightDiff > 4.0) continue;
+
+            return target;
+        }
+        return null;
     }
 
     /**
