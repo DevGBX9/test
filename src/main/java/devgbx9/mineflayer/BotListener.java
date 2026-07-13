@@ -147,18 +147,14 @@ public class BotListener implements Listener {
         }
     }
 
+    /**
+     * Prevent mobs from targeting standstill bots.
+     */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onEntityTarget(org.bukkit.event.entity.EntityTargetLivingEntityEvent event) {
-        org.bukkit.entity.LivingEntity target = event.getTarget();
-        if (target == null) return;
-
-        if (target instanceof Player playerTarget) {
-            BotNPC bot = botManager.getBotByPlayer(playerTarget);
+        if (event.getTarget() instanceof Player target) {
+            BotNPC bot = botManager.getBotByPlayer(target);
             if (bot != null && bot.isStandStill()) {
-                event.setCancelled(true);
-            }
-        } else if (target instanceof org.bukkit.entity.Villager villagerTarget) {
-            if (villagerTarget.hasMetadata("mineflayer_proxy")) {
                 event.setCancelled(true);
             }
         }

@@ -919,16 +919,6 @@ public class NMSHelper {
         return null;
     }
 
-    public static void teleport(Object entity, double x, double y, double z, float yaw, float pitch) {
-        if (entityMoveTo != null && entity != null) {
-            try {
-                entityMoveTo.invoke(entity, x, y, z, yaw, pitch);
-            } catch (Exception e) {
-                // Ignore
-            }
-        }
-    }
-
     static {
         init();
     }
