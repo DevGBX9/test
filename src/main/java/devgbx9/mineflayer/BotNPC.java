@@ -2,7 +2,10 @@ package devgbx9.mineflayer;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -41,6 +44,9 @@ public class BotNPC {
     private boolean respawnEnabled = false;
     private Location spawnLocation;
 
+    // Follow system
+    private Player followTarget = null;
+
     public BotNPC(String name, UUID uuid) {
         this.name = name;
         this.uuid = uuid;
@@ -67,6 +73,10 @@ public class BotNPC {
     public boolean isRespawnEnabled() { return respawnEnabled; }
     public void setRespawnEnabled(boolean respawnEnabled) { this.respawnEnabled = respawnEnabled; }
     public Location getSpawnLocation() { return spawnLocation; }
+
+    public Player getFollowTarget() { return followTarget; }
+    public void setFollowTarget(Player target) { this.followTarget = target; }
+    public void clearFollowTarget() { this.followTarget = null; }
 
     public void spawn(Location location, Object profile) {
         if (alive) return;
@@ -161,6 +171,11 @@ public class BotNPC {
             // === 1. KEEPALIVE: Prevent timeout disconnect ===
             ensureKeepalive();
 
+            // === 1.5. FOLLOW MOVEMENT: Apply velocity toward target before physics tick ===
+            if (!standStill && followTarget != null) {
+                tickFollow();
+            }
+
             // === 2. NATIVE TICK: Call ServerPlayer.doTick() or tick() for full physics ===
             if (!standStill) {
                 if (tickMethod != null) {
@@ -207,28 +222,19 @@ public class BotNPC {
                 }
             }
 
-            // === 3. HEAD TRACKING: Look at nearest player ===
+            // === 3. HEAD TRACKING: Look at nearest player/mob or follow target ===
             if (bukkitPlayer.isOnline()) {
-                if (lookAtEnabled) {
+                if (followTarget != null && followTarget.isOnline()) {
+                    // When following, always look at the follow target
+                    lookAtEntity(followTarget);
+                } else if (lookAtEnabled) {
                     Player nearest = findNearestPlayer();
                     boolean looked = false;
                     if (nearest != null) {
                         double distSquared = nearest.getLocation().distanceSquared(bukkitPlayer.getLocation());
                         if (distSquared <= 25.0) {
-                            Location botEyeLoc = bukkitPlayer.getEyeLocation();
-                            Location targetLoc = nearest.getEyeLocation();
-                            double dx = targetLoc.getX() - botEyeLoc.getX();
-                            double dy = targetLoc.getY() - botEyeLoc.getY();
-                            double dz = targetLoc.getZ() - botEyeLoc.getZ();
-                            double dist = Math.sqrt(dx * dx + dz * dz);
-                            if (dist > 0.001 || Math.abs(dy) > 0.001) {
-                                float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
-                                float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
-                                if (pitch > 90) pitch = 90;
-                                if (pitch < -90) pitch = -90;
-                                NMSHelper.setRotation(serverPlayer, yaw, pitch, yaw);
-                                looked = true;
-                            }
+                            lookAtEntity(nearest);
+                            looked = true;
                         }
                     }
                     if (!looked) {
@@ -245,20 +251,8 @@ public class BotNPC {
                             }
                         }
                         if (nearestMob != null && nearestMobDistSq <= 25.0) {
-                            Location botEyeLoc = bukkitPlayer.getEyeLocation();
-                            Location targetLoc = nearestMob.getEyeLocation();
-                            double dx = targetLoc.getX() - botEyeLoc.getX();
-                            double dy = targetLoc.getY() - botEyeLoc.getY();
-                            double dz = targetLoc.getZ() - botEyeLoc.getZ();
-                            double dist = Math.sqrt(dx * dx + dz * dz);
-                            if (dist > 0.001 || Math.abs(dy) > 0.001) {
-                                float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
-                                float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
-                                if (pitch > 90) pitch = 90;
-                                if (pitch < -90) pitch = -90;
-                                NMSHelper.setRotation(serverPlayer, yaw, pitch, yaw);
-                                looked = true;
-                            }
+                            lookAtEntity(nearestMob);
+                            looked = true;
                         }
                     }
                     if (!looked) {
@@ -270,6 +264,97 @@ public class BotNPC {
                 }
             }
         } catch (Exception ignored) {}
+    }
+    /**
+     * Look at a specific living entity (player or mob), tracking their head.
+     */
+    private void lookAtEntity(org.bukkit.entity.LivingEntity target) {
+        Location botEyeLoc = bukkitPlayer.getEyeLocation();
+        Location targetLoc = target.getEyeLocation();
+        double dx = targetLoc.getX() - botEyeLoc.getX();
+        double dy = targetLoc.getY() - botEyeLoc.getY();
+        double dz = targetLoc.getZ() - botEyeLoc.getZ();
+        double dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist > 0.001 || Math.abs(dy) > 0.001) {
+            float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
+            float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+            if (pitch > 90) pitch = 90;
+            if (pitch < -90) pitch = -90;
+            NMSHelper.setRotation(serverPlayer, yaw, pitch, yaw);
+        }
+    }
+
+    /**
+     * Smart follow movement: calculate velocity toward follow target,
+     * handle jumping over obstacles, and sprint when far away.
+     */
+    private void tickFollow() {
+        if (followTarget == null || !followTarget.isOnline()) {
+            followTarget = null;
+            return;
+        }
+
+        Location botLoc = bukkitPlayer.getLocation();
+        Location targetLoc = followTarget.getLocation();
+
+        // Don't follow if in different worlds
+        if (!botLoc.getWorld().equals(targetLoc.getWorld())) return;
+
+        double distance = botLoc.distance(targetLoc);
+
+        // If close enough, stop moving
+        if (distance < 2.0) {
+            bukkitPlayer.setVelocity(new Vector(0, bukkitPlayer.getVelocity().getY(), 0));
+            return;
+        }
+
+        // Calculate direction toward target
+        double dx = targetLoc.getX() - botLoc.getX();
+        double dz = targetLoc.getZ() - botLoc.getZ();
+        double horizontalDist = Math.sqrt(dx * dx + dz * dz);
+        if (horizontalDist < 0.001) return;
+
+        // Normalize direction
+        double nx = dx / horizontalDist;
+        double nz = dz / horizontalDist;
+
+        // Speed: sprint when far, walk when closer
+        double speed = distance > 6.0 ? 0.26 : 0.19;
+
+        // Calculate horizontal velocity
+        double vx = nx * speed;
+        double vz = nz * speed;
+        double vy = bukkitPlayer.getVelocity().getY();
+
+        // Jump detection: check if there's a solid block in front at feet level
+        // but the space above is clear (so the bot can jump over it)
+        boolean onGround = bukkitPlayer.isOnGround();
+        if (onGround) {
+            Location feetFront = botLoc.clone().add(nx * 0.6, 0, nz * 0.6);
+            Block blockAtFeet = feetFront.getBlock();
+            Block blockAboveFeet = feetFront.clone().add(0, 1, 0).getBlock();
+
+            if (blockAtFeet.getType().isSolid() && !blockAboveFeet.getType().isSolid()) {
+                // Jump! Standard Minecraft jump velocity
+                vy = 0.42;
+            }
+
+            // Also handle water/lava: swim up
+            Block currentBlock = botLoc.getBlock();
+            if (currentBlock.isLiquid()) {
+                vy = 0.12;
+            }
+        }
+
+        // Set sprint state
+        bukkitPlayer.setSprinting(distance > 6.0);
+
+        // Apply velocity
+        bukkitPlayer.setVelocity(new Vector(vx, vy, vz));
+
+        // Face the direction of movement (yaw) — head tracking will look at target separately
+        float moveYaw = (float) Math.toDegrees(Math.atan2(nz, nx)) - 90;
+        NMSHelper.setRotation(serverPlayer, moveYaw, 0f, moveYaw);
     }
 
     /**

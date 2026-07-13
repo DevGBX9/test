@@ -11,6 +11,7 @@ import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.bukkit.Bukkit;
 
 public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, TabCompleter {
 
@@ -101,11 +102,53 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                     sender.sendMessage("§cBot '" + botName + "' not found.");
                     return true;
                 }
-                if (args.length < 3) {
-                    sender.sendMessage("§cUsage: /mineflayer " + botName + " standstill on/off | lookat on/off | respawn on/off");
+                if (args.length < 2) {
+                    sender.sendMessage("§cUsage: /mineflayer " + botName + " <standstill|lookat|respawn|followme|follow|stopfollow>");
                     return true;
                 }
                 String subCmd = args[1].toLowerCase();
+
+                // Handle commands that don't need a third argument
+                switch (subCmd) {
+                    case "followme": {
+                        if (!(sender instanceof Player player)) {
+                            sender.sendMessage("§cOnly players can use this command.");
+                            return true;
+                        }
+                        bot.setFollowTarget(player);
+                        sender.sendMessage("§aBot '" + botName + "' is now following you.");
+                        return true;
+                    }
+                    case "follow": {
+                        if (!sender.isOp()) {
+                            sender.sendMessage("§cThis command requires operator permissions.");
+                            return true;
+                        }
+                        if (args.length < 3) {
+                            sender.sendMessage("§cUsage: /mineflayer " + botName + " follow <playerName>");
+                            return true;
+                        }
+                        Player target = Bukkit.getPlayer(args[2]);
+                        if (target == null || !target.isOnline()) {
+                            sender.sendMessage("§cPlayer '" + args[2] + "' not found or offline.");
+                            return true;
+                        }
+                        bot.setFollowTarget(target);
+                        sender.sendMessage("§aBot '" + botName + "' is now following " + target.getName() + ".");
+                        return true;
+                    }
+                    case "stopfollow": {
+                        bot.clearFollowTarget();
+                        sender.sendMessage("§aBot '" + botName + "' stopped following.");
+                        return true;
+                    }
+                }
+
+                // Handle commands that require on/off
+                if (args.length < 3) {
+                    sender.sendMessage("§cUsage: /mineflayer " + botName + " " + subCmd + " on/off");
+                    return true;
+                }
                 String value = args[2].toLowerCase();
                 boolean on = value.equals("on");
 
@@ -126,7 +169,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                         break;
                     }
                     default: {
-                        sender.sendMessage("§cUnknown subcommand. Use: standstill, lookat, respawn");
+                        sender.sendMessage("§cUnknown subcommand. Use: standstill, lookat, respawn, followme, follow, stopfollow");
                         break;
                     }
                 }
@@ -158,7 +201,7 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
                 }
             } else if (botManager.exists(first)) {
                 // Bot name was typed, suggest subcommands
-                for (String cmd : List.of("standstill", "lookat", "respawn")) {
+                for (String cmd : List.of("standstill", "lookat", "respawn", "followme", "follow", "stopfollow")) {
                     if (cmd.startsWith(prefix)) result.add(cmd);
                 }
             }
@@ -170,6 +213,11 @@ public class MineflayerPlugin extends JavaPlugin implements CommandExecutor, Tab
             if (sub.equals("standstill") || sub.equals("lookat") || sub.equals("respawn")) {
                 for (String v : List.of("on", "off")) {
                     if (v.startsWith(prefix)) result.add(v);
+                }
+            } else if (sub.equals("follow")) {
+                // Suggest online player names
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    if (p.getName().toLowerCase().startsWith(prefix)) result.add(p.getName());
                 }
             }
             return result;

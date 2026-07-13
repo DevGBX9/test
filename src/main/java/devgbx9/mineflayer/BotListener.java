@@ -29,6 +29,8 @@ public class BotListener implements Listener {
         if (bot != null) {
             String name = bot.getName();
             if (bot.isRespawnEnabled()) {
+                // Clear follow target on death — must re-issue command after respawn
+                bot.clearFollowTarget();
                 // Delay by 1 tick to prevent dead-body glitching
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     if (bot.isAlive() && bot.getBukkitPlayer() != null) {
