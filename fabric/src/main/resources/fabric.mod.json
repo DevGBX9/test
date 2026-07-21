@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "${mod_id}",
+  "version": "${mod_version}",
+  "name": "${mod_name}",
+  "description": "Client-side Fabric mod companion for the Mineflayer bot plugin.",
+  "authors": [
+    "DevGBX9"
+  ],
+  "license": "MIT",
+  "icon": "assets/mineflayer/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "devgbx9.mineflayer.fabric.MineflayerFabricMod"
+    ]
+  },
+  "mixins": [
+    "mineflayer.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_ver}",
+    "minecraft": "~${mc_version}",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}

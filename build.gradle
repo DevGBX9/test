@@ -1,55 +1,19 @@
+// Root build — delegates everything to subprojects
 plugins {
     id 'java'
-    id 'maven-publish'
 }
 
 group = project.maven_group
 version = project.plugin_version
-base {
-    archivesName = project.archives_base_name
-}
 
-repositories {
-    maven {
-        name 'PaperMC'
-        url 'https://repo.papermc.io/repository/maven-public/'
-    }
-    mavenCentral()
-}
+subprojects {
+    apply plugin: 'java'
 
-dependencies {
-    compileOnly "io.papermc.paper:paper-api:${project.paper_api_version}"
-}
-
-java {
-    toolchain.languageVersion = JavaLanguageVersion.of(25)
-}
-
-processResources {
-    def props = [
-        id: project.plugin_id,
-        name: project.plugin_name,
-        version: project.version,
-        minecraft_version: project.minecraft_version,
-    ]
-    inputs.properties props
-    filesMatching('plugin.yml') {
-        expand props
-    }
-}
-
-tasks.withType(JavaCompile).configureEach {
-    options.encoding = 'UTF-8'
-    options.release = 25
-}
-
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            from components.java
-        }
-    }
     repositories {
-        mavenLocal()
+        mavenCentral()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
     }
 }

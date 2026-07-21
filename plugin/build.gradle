@@ -1,0 +1,44 @@
+plugins {
+    id 'java'
+}
+
+group = rootProject.group
+version = rootProject.version
+
+base {
+    archivesName = 'mineflayer-plugin'
+}
+
+repositories {
+    maven {
+        name 'PaperMC'
+        url 'https://repo.papermc.io/repository/maven-public/'
+    }
+    mavenCentral()
+}
+
+dependencies {
+    compileOnly "io.papermc.paper:paper-api:${rootProject.paper_api_version}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+}
+
+processResources {
+    def props = [
+        id: rootProject.plugin_id,
+        name: rootProject.plugin_name,
+        version: rootProject.version,
+        minecraft_version: rootProject.minecraft_version,
+    ]
+    inputs.properties props
+    filesMatching('plugin.yml') {
+        expand props
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 25
+}

@@ -1,6 +1,10 @@
 pluginManagement {
     repositories {
         maven {
+            name 'FabricMC'
+            url 'https://maven.fabricmc.net/'
+        }
+        maven {
             name 'PaperMC'
             url 'https://repo.papermc.io/repository/maven-public/'
         }
@@ -9,4 +13,7 @@ pluginManagement {
     }
 }
 
-rootProject.name = 'template_plugin'
+rootProject.name = 'mineflayer'
+
+include 'plugin'
+include 'fabric'

@@ -3,7 +3,8 @@ name: ما جديد
 on: [push, pull_request]
 
 jobs:
-  build:
+  build-plugin:
+    name: Build Plugin (Paper/Spigot)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -12,9 +13,28 @@ jobs:
           distribution: temurin
           java-version: 25
       - uses: gradle/actions/setup-gradle@v5
-      - run: ./gradlew build
+      - name: Build Plugin JAR
+        run: ./gradlew :plugin:build
       - uses: actions/upload-artifact@v6
         with:
-          name: plugin-jar
-          path: build/libs/*.jar
+          name: mineflayer-plugin
+          path: plugin/build/libs/*.jar
+          if-no-files-found: error
+
+  build-fabric:
+    name: Build Fabric Mod (Client)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Build Fabric JAR
+        run: ./gradlew :fabric:build
+      - uses: actions/upload-artifact@v6
+        with:
+          name: mineflayer-fabric
+          path: fabric/build/libs/*.jar
           if-no-files-found: error
