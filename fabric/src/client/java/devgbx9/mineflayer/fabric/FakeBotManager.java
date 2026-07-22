@@ -4,7 +4,7 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.text.Text;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.util.math.Vec3d;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
@@ -43,7 +43,7 @@ public class FakeBotManager {
             return;
         }
 
-        Vec3 pos = source.getClient().player.getPos();
+        Vec3d pos = source.getClient().player.getPos();
         FakeBot bot = new FakeBot(name, world, pos);
         activeBots.put(name.toLowerCase(), bot);
         source.sendFeedback(Text.literal("§aSpawned client-side bot '" + name + "' at your location."));
